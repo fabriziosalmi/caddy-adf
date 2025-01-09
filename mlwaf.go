@@ -66,11 +66,27 @@ func (m *MLWAF) Provision(ctx caddy.Context) error {
 	return nil
 }
 
-// Validate ensures the configuration is valid.
 func (m *MLWAF) Validate() error {
+	// Validate thresholds
 	if m.AnomalyThreshold >= m.BlockingThreshold {
 		return fmt.Errorf("anomaly_threshold should be less than blocking_threshold")
 	}
+
+	// Validate weights
+	if m.RequestSizeWeight < 0 {
+		return fmt.Errorf("request_size_weight cannot be negative")
+	}
+	if m.HeaderCountWeight < 0 {
+		return fmt.Errorf("header_count_weight cannot be negative")
+	}
+	if m.QueryParamCountWeight < 0 {
+		return fmt.Errorf("query_param_count_weight cannot be negative")
+	}
+	if m.PathSegmentCountWeight < 0 {
+		return fmt.Errorf("path_segment_count_weight cannot be negative")
+	}
+
+	// Validate ranges
 	if m.NormalRequestSizeRangeMin > 0 && m.NormalRequestSizeRangeMax > 0 && m.NormalRequestSizeRangeMin >= m.NormalRequestSizeRangeMax {
 		return fmt.Errorf("normal_request_size_min should be less than normal_request_size_max")
 	}
@@ -83,6 +99,29 @@ func (m *MLWAF) Validate() error {
 	if m.NormalPathSegmentCountMin > 0 && m.NormalPathSegmentCountMax > 0 && m.NormalPathSegmentCountMin >= m.NormalPathSegmentCountMax {
 		return fmt.Errorf("normal_path_segment_count_min should be less than normal_path_segment_count_max")
 	}
+
+	// Ensure ranges are valid (min and max must both be positive)
+	if m.NormalRequestSizeRangeMin < 0 || m.NormalRequestSizeRangeMax < 0 {
+		return fmt.Errorf("normal_request_size_range values must be positive")
+	}
+	if m.NormalHeaderCountMin < 0 || m.NormalHeaderCountMax < 0 {
+		return fmt.Errorf("normal_header_count_range values must be positive")
+	}
+	if m.NormalQueryParamCountMin < 0 || m.NormalQueryParamCountMax < 0 {
+		return fmt.Errorf("normal_query_param_count_range values must be positive")
+	}
+	if m.NormalPathSegmentCountMin < 0 || m.NormalPathSegmentCountMax < 0 {
+		return fmt.Errorf("normal_path_segment_count_range values must be positive")
+	}
+
+	// Validate history configuration
+	if m.HistoryWindow <= 0 {
+		return fmt.Errorf("history_window must be a positive duration")
+	}
+	if m.MaxHistoryEntries <= 0 {
+		return fmt.Errorf("max_history_entries must be a positive integer")
+	}
+
 	return nil
 }
 
@@ -95,18 +134,28 @@ func (m *MLWAF) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp
 	queryParamCount := len(r.URL.Query())
 	pathSegmentCount := len(strings.Split(strings.Trim(r.URL.Path, "/"), "/"))
 
+	// Log detailed request information
+	m.logger.Debug("incoming request",
+		zap.String("client_ip", clientIP),
+		zap.String("method", r.Method),
+		zap.String("path", r.URL.Path),
+		zap.Int64("request_size", requestSize),
+		zap.Int("header_count", headerCount),
+		zap.Int("query_param_count", queryParamCount),
+		zap.Int("path_segment_count", pathSegmentCount),
+		zap.Any("headers", r.Header),           // Optional: Log headers for debugging
+		zap.Any("query_params", r.URL.Query()), // Optional: Log query parameters for debugging
+	)
+
 	m.historyMutex.Lock()
 	history := m.requestHistory[clientIP]
 	m.historyMutex.Unlock()
 
 	anomalyScore := m.calculateAnomalyScore(requestSize, headerCount, queryParamCount, pathSegmentCount, history)
 
+	// Log anomaly score calculation details
 	m.logger.Debug("calculated anomaly score",
 		zap.String("client_ip", clientIP),
-		zap.Int64("request_size", requestSize),
-		zap.Int("header_count", headerCount),
-		zap.Int("query_param_count", queryParamCount),
-		zap.Int("path_segment_count", pathSegmentCount),
 		zap.Float64("anomaly_score", anomalyScore),
 		zap.String("path", r.URL.Path),
 	)
@@ -171,6 +220,13 @@ func (m *MLWAF) updateRequestHistory(clientIP string, anomalyScore float64) {
 	}
 
 	m.requestHistory[clientIP] = prunedHistory
+
+	// Log request history update
+	m.logger.Debug("updated request history",
+		zap.String("client_ip", clientIP),
+		zap.Float64("anomaly_score", anomalyScore),
+		zap.Int("history_size", len(prunedHistory)),
+	)
 }
 
 // responseWriterWrapper is a custom ResponseWriter to capture the status code.
@@ -184,49 +240,88 @@ func (rw *responseWriterWrapper) WriteHeader(statusCode int) {
 	rw.ResponseWriter.WriteHeader(statusCode)
 }
 
+func normalize(value float64, min float64, max float64) float64 {
+	if min == max {
+		return 0.0 // No range, so no deviation
+	}
+	if value < min {
+		return (min - value) / (min + 1) // Add 1 to avoid division by zero
+	} else if value > max {
+		return math.Log((value-max)/(max+1) + 1) // Logarithmic scaling for large values
+	}
+	return 0.0 // Within normal range
+}
+
 func (m *MLWAF) calculateAnomalyScore(requestSize int64, headerCount int, queryParamCount int, pathSegmentCount int, history []requestRecord) float64 {
 	score := 0.0
 
 	// Helper function to normalize
 	normalize := func(value float64, min float64, max float64) float64 {
-		if value < min {
-			return (min - value) / (min) // Normalize to 0-1, assuming min is not zero
-		} else if value > max {
-			return (value - max) / (max) // Normalize to 0-1, assuming max is not zero
+		if min == max {
+			return 0.0 // No range, so no deviation
 		}
-		return 0.0
+		if value < min {
+			return (min - value) / (min + 1) // Add 1 to avoid division by zero
+		} else if value > max {
+			return math.Log((value-max)/(max+1) + 1) // Logarithmic scaling for large values
+		}
+		return 0.0 // Within normal range
 	}
 
+	// Calculate score for request size
 	if m.RequestSizeWeight > 0 {
 		var normalizedRequestSize float64 = 0.0
 		if m.NormalRequestSizeRangeMin > 0 && m.NormalRequestSizeRangeMax > 0 {
 			normalizedRequestSize = normalize(float64(requestSize), float64(m.NormalRequestSizeRangeMin), float64(m.NormalRequestSizeRangeMax))
 		}
 		score += m.RequestSizeWeight * normalizedRequestSize
+		m.logger.Debug("request size contribution to anomaly score",
+			zap.Float64("normalized_request_size", normalizedRequestSize),
+			zap.Float64("weight", m.RequestSizeWeight),
+			zap.Float64("contribution", m.RequestSizeWeight*normalizedRequestSize),
+		)
 	}
 
+	// Calculate score for header count
 	if m.HeaderCountWeight > 0 {
 		var normalizedHeaderCount float64 = 0.0
 		if m.NormalHeaderCountMin > 0 && m.NormalHeaderCountMax > 0 {
 			normalizedHeaderCount = normalize(float64(headerCount), float64(m.NormalHeaderCountMin), float64(m.NormalHeaderCountMax))
 		}
 		score += m.HeaderCountWeight * normalizedHeaderCount
+		m.logger.Debug("header count contribution to anomaly score",
+			zap.Float64("normalized_header_count", normalizedHeaderCount),
+			zap.Float64("weight", m.HeaderCountWeight),
+			zap.Float64("contribution", m.HeaderCountWeight*normalizedHeaderCount),
+		)
 	}
 
+	// Calculate score for query parameter count
 	if m.QueryParamCountWeight > 0 {
 		var normalizedQueryParamCount float64 = 0.0
 		if m.NormalQueryParamCountMin > 0 && m.NormalQueryParamCountMax > 0 {
 			normalizedQueryParamCount = normalize(float64(queryParamCount), float64(m.NormalQueryParamCountMin), float64(m.NormalQueryParamCountMax))
 		}
 		score += m.QueryParamCountWeight * normalizedQueryParamCount
+		m.logger.Debug("query parameter count contribution to anomaly score",
+			zap.Float64("normalized_query_param_count", normalizedQueryParamCount),
+			zap.Float64("weight", m.QueryParamCountWeight),
+			zap.Float64("contribution", m.QueryParamCountWeight*normalizedQueryParamCount),
+		)
 	}
 
+	// Calculate score for path segment count
 	if m.PathSegmentCountWeight > 0 {
 		var normalizedPathSegmentCount float64 = 0.0
 		if m.NormalPathSegmentCountMin > 0 && m.NormalPathSegmentCountMax > 0 {
 			normalizedPathSegmentCount = normalize(float64(pathSegmentCount), float64(m.NormalPathSegmentCountMin), float64(m.NormalPathSegmentCountMax))
 		}
 		score += m.PathSegmentCountWeight * normalizedPathSegmentCount
+		m.logger.Debug("path segment count contribution to anomaly score",
+			zap.Float64("normalized_path_segment_count", normalizedPathSegmentCount),
+			zap.Float64("weight", m.PathSegmentCountWeight),
+			zap.Float64("contribution", m.PathSegmentCountWeight*normalizedPathSegmentCount),
+		)
 	}
 
 	// Apply correlation logic based on request history
@@ -238,9 +333,21 @@ func (m *MLWAF) calculateAnomalyScore(requestSize int64, headerCount int, queryP
 			severityWeight := record.AnomalyScore / m.BlockingThreshold
 
 			correlationScore += 0.15 * timeWeight * severityWeight
+			m.logger.Debug("correlation score contribution from history",
+				zap.Time("record_timestamp", record.Timestamp),
+				zap.Float64("record_anomaly_score", record.AnomalyScore),
+				zap.Float64("time_weight", timeWeight),
+				zap.Float64("severity_weight", severityWeight),
+				zap.Float64("contribution", 0.15*timeWeight*severityWeight),
+			)
 		}
 	}
 	score += correlationScore
+
+	// Log total anomaly score
+	m.logger.Debug("total anomaly score calculated",
+		zap.Float64("total_score", score),
+	)
 
 	return score
 }
