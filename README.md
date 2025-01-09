@@ -39,9 +39,16 @@ The `caddy-mlf` module provides a simulated Machine Learning WAF functionality w
 
 To install the `caddy-mlf` module, you'll need to build Caddy with this module included.
 
-1. **Install xcaddy:** If you don't have it already, install xcaddy:
+1. **Install xcaddy:** If you don't have it already, install xcaddy and required modules:
     ```bash
     go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+
+   go get github.com/caddyserver/caddy/v2/cmd@v2.9.1
+   go get github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile@v2.9.1
+   go get github.com/caddyserver/caddy/v2/modules/caddyhttp@v2.9.1
+   go get github.com/caddyserver/caddy/v2/modules/caddypki@v2.9.1
+   go get github.com/caddyserver/caddy/v2/modules/caddytls@v2.9.1
+
     ```
 
 2. **Build Caddy with the module:** Navigate to where you want to build Caddy and run:
