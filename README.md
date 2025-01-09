@@ -82,19 +82,19 @@ The basic configuration example below demonstrates how to set up the module with
     handle {
         ml_waf {
             # Thresholds
-            anomaly_threshold 0.8
-            blocking_threshold 0.95
+            anomaly_threshold 0.8                  # Anomaly score above which traffic is marked as suspicious
+            blocking_threshold 0.95                # Anomaly score above which traffic is blocked
 
             # Normal ranges for request attributes
-            normal_request_size_range 50 2000
-            normal_header_count_range 3 30
-            normal_query_param_count_range 0 10
-            normal_path_segment_count_range 1 5
+            normal_request_size_range 50 2000      # Min and max size (in bytes) of a normal request
+            normal_header_count_range 3 30         # Min and max number of headers in a normal request
+            normal_query_param_count_range 0 10    # Min and max number of query parameters in a normal request
+            normal_path_segment_count_range 1 5    # Min and max number of path segments in a normal request
 
             # Additional attributes
-            normal_http_methods GET POST
-            normal_user_agents Chrome Firefox
-            normal_referrers https://example.com
+            normal_http_methods GET POST           # Allowed HTTP methods (e.g., GET, POST)
+            normal_user_agents Chrome Firefox      # Allowed User-Agent strings (e.g., Chrome, Firefox)
+            normal_referrers https://example.com   # Allowed Referrer headers (e.g., trusted domains)
 
             # Weights (sum = 1)
             request_size_weight 0.3          # Most critical - large or tiny requests often indicate anomalies
@@ -105,9 +105,10 @@ The basic configuration example below demonstrates how to set up the module with
             referrer_weight 0.05             # Less significant - deviations may be less impactful
             path_segment_count_weight 0.05   # Less significant - anomalies here are rarer
 
+
             # Request history settings
-            history_window 10m
-            max_history_entries 100
+            history_window 10m                     # Time window for considering past requests (e.g., 5m, 1h)
+            max_history_entries 100                # Maximum number of past requests to keep in history
         }
         respond "Hello, world!"
     }
