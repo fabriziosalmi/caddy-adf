@@ -39,6 +39,12 @@ type MLWAF struct {
 	PathSegmentCountWeight    float64       `json:"path_segment_count_weight,omitempty"`
 	HistoryWindow             time.Duration `json:"history_window,omitempty"`
 	MaxHistoryEntries         int           `json:"max_history_entries,omitempty"`
+	NormalHTTPMethods         []string      `json:"normal_http_methods,omitempty"` // Allowed HTTP methods
+	NormalUserAgents          []string      `json:"normal_user_agents,omitempty"`  // Allowed User-Agent strings
+	NormalReferrers           []string      `json:"normal_referrers,omitempty"`    // Allowed Referrer headers
+	HTTPMethodWeight          float64       `json:"http_method_weight,omitempty"`  // Weight for HTTP method
+	UserAgentWeight           float64       `json:"user_agent_weight,omitempty"`   // Weight for User-Agent
+	ReferrerWeight            float64       `json:"referrer_weight,omitempty"`     // Weight for Referrer
 
 	requestHistory map[string][]requestRecord
 	historyMutex   sync.Mutex
@@ -122,10 +128,20 @@ func (m *MLWAF) Validate() error {
 		return fmt.Errorf("max_history_entries must be a positive integer")
 	}
 
+	// Validate weights for new attributes
+	if m.HTTPMethodWeight < 0 {
+		return fmt.Errorf("http_method_weight cannot be negative")
+	}
+	if m.UserAgentWeight < 0 {
+		return fmt.Errorf("user_agent_weight cannot be negative")
+	}
+	if m.ReferrerWeight < 0 {
+		return fmt.Errorf("referrer_weight cannot be negative")
+	}
+
 	return nil
 }
 
-// ServeHTTP handles the HTTP request.
 func (m *MLWAF) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
 	startTime := time.Now()
 	clientIP := r.RemoteAddr
@@ -133,16 +149,21 @@ func (m *MLWAF) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp
 	headerCount := len(r.Header)
 	queryParamCount := len(r.URL.Query())
 	pathSegmentCount := len(strings.Split(strings.Trim(r.URL.Path, "/"), "/"))
+	httpMethod := r.Method
+	userAgent := r.Header.Get("User-Agent")
+	referrer := r.Header.Get("Referer")
 
 	// Log detailed request information
 	m.logger.Debug("incoming request",
 		zap.String("client_ip", clientIP),
-		zap.String("method", r.Method),
+		zap.String("method", httpMethod),
 		zap.String("path", r.URL.Path),
 		zap.Int64("request_size", requestSize),
 		zap.Int("header_count", headerCount),
 		zap.Int("query_param_count", queryParamCount),
 		zap.Int("path_segment_count", pathSegmentCount),
+		zap.String("user_agent", userAgent),
+		zap.String("referrer", referrer),
 		zap.Any("headers", r.Header),           // Optional: Log headers for debugging
 		zap.Any("query_params", r.URL.Query()), // Optional: Log query parameters for debugging
 	)
@@ -151,7 +172,8 @@ func (m *MLWAF) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp
 	history := m.requestHistory[clientIP]
 	m.historyMutex.Unlock()
 
-	anomalyScore := m.calculateAnomalyScore(requestSize, headerCount, queryParamCount, pathSegmentCount, history)
+	// Pass the new arguments (httpMethod, userAgent, referrer) to calculateAnomalyScore
+	anomalyScore := m.calculateAnomalyScore(requestSize, headerCount, queryParamCount, pathSegmentCount, history, httpMethod, userAgent, referrer)
 
 	// Log anomaly score calculation details
 	m.logger.Debug("calculated anomaly score",
@@ -252,7 +274,7 @@ func normalize(value float64, min float64, max float64) float64 {
 	return 0.0 // Within normal range
 }
 
-func (m *MLWAF) calculateAnomalyScore(requestSize int64, headerCount int, queryParamCount int, pathSegmentCount int, history []requestRecord) float64 {
+func (m *MLWAF) calculateAnomalyScore(requestSize int64, headerCount int, queryParamCount int, pathSegmentCount int, history []requestRecord, httpMethod string, userAgent string, referrer string) float64 {
 	score := 0.0
 
 	// Helper function to normalize
@@ -322,6 +344,63 @@ func (m *MLWAF) calculateAnomalyScore(requestSize int64, headerCount int, queryP
 			zap.Float64("weight", m.PathSegmentCountWeight),
 			zap.Float64("contribution", m.PathSegmentCountWeight*normalizedPathSegmentCount),
 		)
+	}
+
+	// Calculate score for HTTP method
+	if m.HTTPMethodWeight > 0 && len(m.NormalHTTPMethods) > 0 {
+		isNormalMethod := false
+		for _, method := range m.NormalHTTPMethods {
+			if httpMethod == method {
+				isNormalMethod = true
+				break
+			}
+		}
+		if !isNormalMethod {
+			score += m.HTTPMethodWeight
+			m.logger.Debug("HTTP method contribution to anomaly score",
+				zap.String("http_method", httpMethod),
+				zap.Float64("weight", m.HTTPMethodWeight),
+				zap.Float64("contribution", m.HTTPMethodWeight),
+			)
+		}
+	}
+
+	// Calculate score for User-Agent
+	if m.UserAgentWeight > 0 && len(m.NormalUserAgents) > 0 {
+		isNormalUserAgent := false
+		for _, ua := range m.NormalUserAgents {
+			if strings.Contains(userAgent, ua) {
+				isNormalUserAgent = true
+				break
+			}
+		}
+		if !isNormalUserAgent {
+			score += m.UserAgentWeight
+			m.logger.Debug("User-Agent contribution to anomaly score",
+				zap.String("user_agent", userAgent),
+				zap.Float64("weight", m.UserAgentWeight),
+				zap.Float64("contribution", m.UserAgentWeight),
+			)
+		}
+	}
+
+	// Calculate score for Referrer
+	if m.ReferrerWeight > 0 && len(m.NormalReferrers) > 0 {
+		isNormalReferrer := false
+		for _, ref := range m.NormalReferrers {
+			if strings.Contains(referrer, ref) {
+				isNormalReferrer = true
+				break
+			}
+		}
+		if !isNormalReferrer {
+			score += m.ReferrerWeight
+			m.logger.Debug("Referrer contribution to anomaly score",
+				zap.String("referrer", referrer),
+				zap.Float64("weight", m.ReferrerWeight),
+				zap.Float64("contribution", m.ReferrerWeight),
+			)
+		}
 	}
 
 	// Apply correlation logic based on request history
@@ -509,6 +588,48 @@ func (m *MLWAF) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					return d.Errf("parsing max_history_entries: %v", err)
 				}
 				m.MaxHistoryEntries = count
+			case "normal_http_methods":
+				m.NormalHTTPMethods = []string{}
+				for d.NextArg() {
+					m.NormalHTTPMethods = append(m.NormalHTTPMethods, d.Val())
+				}
+			case "normal_user_agents":
+				m.NormalUserAgents = []string{}
+				for d.NextArg() {
+					m.NormalUserAgents = append(m.NormalUserAgents, d.Val())
+				}
+			case "normal_referrers":
+				m.NormalReferrers = []string{}
+				for d.NextArg() {
+					m.NormalReferrers = append(m.NormalReferrers, d.Val())
+				}
+			case "http_method_weight":
+				if !d.NextArg() {
+					return d.ArgErr()
+				}
+				val, err := strconv.ParseFloat(d.Val(), 64)
+				if err != nil {
+					return d.Errf("parsing http_method_weight: %v", err)
+				}
+				m.HTTPMethodWeight = val
+			case "user_agent_weight":
+				if !d.NextArg() {
+					return d.ArgErr()
+				}
+				val, err := strconv.ParseFloat(d.Val(), 64)
+				if err != nil {
+					return d.Errf("parsing user_agent_weight: %v", err)
+				}
+				m.UserAgentWeight = val
+			case "referrer_weight":
+				if !d.NextArg() {
+					return d.ArgErr()
+				}
+				val, err := strconv.ParseFloat(d.Val(), 64)
+				if err != nil {
+					return d.Errf("parsing referrer_weight: %v", err)
+				}
+				m.ReferrerWeight = val
 			default:
 				return d.Errf("unrecognized option: %s", d.Val())
 			}
