@@ -19,19 +19,20 @@
             normal_query_param_count_range 0 10    # Min and max number of query parameters in a normal request
             normal_path_segment_count_range 1 5    # Min and max number of path segments in a normal request
 
-            # Weights for anomaly score calculation
-            request_size_weight 0.4                # Weight given to deviations in request size
-            header_count_weight 0.3                # Weight given to deviations in header count
-            query_param_count_weight 0.2           # Weight given to deviations in query parameter count
-            path_segment_count_weight 0.1          # Weight given to deviations in path segment count
-
-            # Additional attributes (new)
+            # Additional attributes
             normal_http_methods GET POST           # Allowed HTTP methods (e.g., GET, POST)
             normal_user_agents Chrome Firefox      # Allowed User-Agent strings (e.g., Chrome, Firefox)
             normal_referrers https://example.com   # Allowed Referrer headers (e.g., trusted domains)
-            http_method_weight 0.2                 # Weight given to deviations in HTTP method
-            user_agent_weight 0.2                  # Weight given to deviations in User-Agent
-            referrer_weight 0.2                    # Weight given to deviations in Referrer
+
+            # Weights (sum = 1)
+            request_size_weight 0.3          # Most critical - large or tiny requests often indicate anomalies
+            header_count_weight 0.25         # Highly significant - unusual header counts are suspicious
+            query_param_count_weight 0.15    # Moderate - unusual query parameters can be indicative
+            http_method_weight 0.1           # Important - unusual HTTP methods could be malicious
+            user_agent_weight 0.1            # Important - bots or malicious actors often have abnormal User-Agents
+            referrer_weight 0.05             # Less significant - deviations may be less impactful
+            path_segment_count_weight 0.05   # Less significant - anomalies here are rarer
+
 
             # Request history settings
             history_window 10m                     # Time window for considering past requests (e.g., 5m, 1h)
