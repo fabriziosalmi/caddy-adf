@@ -53,7 +53,7 @@ To install the `caddy-mlf` module, you'll need to build Caddy with this module i
 
 2. **Build Caddy with the module:** Navigate to where you want to build Caddy and run:
     ```bash
-    xcaddy build --with github.com/fabriziosalmi/caddy-mlf
+    xcaddy build --with github.com/fabriziosalmi/caddy-mlf=./
     ```
     *(Replace `github.com/fabriziosalmi/caddy-mlf` with the actual import path of your module.)*
 
