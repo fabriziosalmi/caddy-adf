@@ -46,9 +46,9 @@ To install the `caddy-mlf` module, you'll need to build Caddy with this module i
 
 2. **Build Caddy with the module:** Navigate to where you want to build Caddy and run:
     ```bash
-    xcaddy build --with github.com/yourusername/caddy-mlf
+    xcaddy build --with github.com/fabriziosalmi/caddy-mlf
     ```
-    *(Replace `github.com/yourusername/caddy-mlf` with the actual import path of your module.)*
+    *(Replace `github.com/fabriziosalmi/caddy-mlf` with the actual import path of your module.)*
 
    This will create an executable named `caddy` in your current directory.
 
@@ -59,12 +59,32 @@ To use the `caddy-mlf` module, you need to configure it within your Caddyfile. T
 ### Basic Configuration
 
 ```caddyfile
-example.com {
-    ml_waf {
-        anomaly_threshold 0.5
-        blocking_threshold 0.8
+{
+    admin off
+    order ml_waf before respond
+    log {
+        level debug
     }
-    reverse_proxy localhost:8080
+}
+
+:8080 {
+    handle {
+        ml_waf {
+            anomaly_threshold 0.6
+            blocking_threshold 0.9
+            normal_request_size_range 100 1000
+            normal_header_count_range 5 20
+            normal_query_param_count_range 0 5
+            normal_path_segment_count_range 1 3
+            request_size_weight 0.8
+            header_count_weight 0.7
+            query_param_count_weight 0.6
+            path_segment_count_weight 0.5
+            history_window 5m
+            max_history_entries 20
+        }
+        respond "Hello, world!"
+    }
 }
 ```
 
