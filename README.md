@@ -96,14 +96,14 @@ The basic configuration example below demonstrates how to set up the module with
             normal_user_agents Chrome Firefox
             normal_referrers https://example.com
 
-            # Weights
-            request_size_weight 0.4
-            header_count_weight 0.3
-            query_param_count_weight 0.2
-            path_segment_count_weight 0.1
-            http_method_weight 0.2
-            user_agent_weight 0.2
-            referrer_weight 0.2
+            # Weights (sum = 1)
+            request_size_weight 0.3          # Most critical - large or tiny requests often indicate anomalies
+            header_count_weight 0.25         # Highly significant - unusual header counts are suspicious
+            query_param_count_weight 0.15    # Moderate - unusual query parameters can be indicative
+            http_method_weight 0.1           # Important - unusual HTTP methods could be malicious
+            user_agent_weight 0.1            # Important - bots or malicious actors often have abnormal User-Agents
+            referrer_weight 0.05             # Less significant - deviations may be less impactful
+            path_segment_count_weight 0.05   # Less significant - anomalies here are rarer
 
             # Request history settings
             history_window 10m
