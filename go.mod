@@ -1,3 +1,3 @@
-module caddy-mlf
+module github.com/fabriziosalmi/caddy-mlf
 
 go 1.23.4
