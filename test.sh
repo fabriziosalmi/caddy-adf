@@ -1,23 +1,32 @@
 #!/bin/bash
 
-# Server URL
-SERVER_URL="http://localhost:8080"
+# --- Configuration ---
+SERVER_URL="http://localhost:8080" # Server URL to test against
+MAX_REQUEST_SIZE=1500              # Maximum allowed request size (bytes)
+MIN_REQUEST_SIZE=10               # Minimum allowed request size (bytes)
+MAX_HEADER_COUNT=10               # Maximum allowed number of headers
+MIN_HEADER_COUNT=2                # Minimum allowed number of headers
+MAX_HEADER_VALUE_LENGTH=400       # Maximum length of a header value (characters)
+MAX_QUERY_PARAM_COUNT=5           # Maximum number of query parameters
+MIN_QUERY_PARAM_COUNT=1           # Minimum number of query parameters
+MAX_PATH_SEGMENT_COUNT=5          # Maximum number of path segments
+MIN_PATH_SEGMENT_COUNT=2          # Minimum number of path segments
 
-# WAF Thresholds
-MAX_REQUEST_SIZE=1500
-MIN_REQUEST_SIZE=10
-MAX_HEADER_COUNT=10
-MIN_HEADER_COUNT=2
-MAX_HEADER_VALUE_LENGTH=400
-
-# ANSI color codes
+# ANSI color codes for output formatting
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Function to perform a test and return the status code
+# --- Utility Functions ---
+
+# Generates a random string of a specified length
+generate_random_string() {
+  openssl rand -base64 "$(( ($1 * 3 / 4) + 3 ))" | head -c "$1"
+}
+
+# Runs a test, logs the results, and returns the status code
 run_test() {
   local test_name="$1"
   local url="$2"
@@ -62,13 +71,13 @@ run_test() {
   echo "$actual_status"
 }
 
-generate_random_string() {
-  openssl rand -base64 "$(( ($1 * 3 / 4) + 3 ))" | head -c "$1"
-}
+
+# --- Test Scenarios ---
 
 # Initialize counters
 total_tests=0
 unexpected_behavior=0
+
 
 # --- Baseline Tests ---
 total_tests=$((total_tests + 1))
@@ -126,6 +135,7 @@ if [[ ! "$just_above_min_status" =~ ^2[0-9]{2}$ ]]; then
     printf "${YELLOW}WARN: Request Size - Just Above Min unexpectedly blocked (non-2xx), check threshold configuration.${NC}\n"
     unexpected_behavior=$((unexpected_behavior + 1))
 fi
+
 
 # --- Header Count Tests ---
 total_tests=$((total_tests + 1))
@@ -249,6 +259,7 @@ if [[ "$delete_test_status" != "403" ]]; then
     printf "${YELLOW}WARN: HTTP Method - DELETE did not return 403, check server/WAF configuration.${NC}\n"
 fi
 
+
 # --- Headers with unusual characters ---
 total_tests=$((total_tests + 1))
 unusual_header_status=$(run_test "Headers - Unusual Characters" "$SERVER_URL/normal" GET "" "X-Weird-Header: !@#$%^&*()" "4.." "Should block headers with unusual characters.")
@@ -267,6 +278,171 @@ if [[ ! "$long_header_status" =~ ^4[0-9]{2}$ ]]; then
   unexpected_behavior=$((unexpected_behavior + 1))
 fi
 
+
+# --- Query Parameter Count Tests ---
+total_tests=$((total_tests + 1))
+exceed_max_query_params=$((MAX_QUERY_PARAM_COUNT + 2))
+declare -a many_query_params_array
+for i in $(seq 1 $exceed_max_query_params); do
+  many_query_params_array+=("param$i=value$i")
+done
+many_query_params_string=$(IFS='&'; echo "${many_query_params_array[*]}")
+many_query_params_status=$(run_test "Query Params - Exceeding Max" "$SERVER_URL/normal?$many_query_params_string" GET "" "" "4.." "Should block requests with more than the maximum number of query parameters ($MAX_QUERY_PARAM_COUNT).")
+if [[ ! "$many_query_params_status" =~ ^4[0-9]{2}$ ]]; then
+  printf "${RED}FAIL: Query Params - Exceeding Max did NOT trigger WAF (non-4xx).${NC}\n"
+  unexpected_behavior=$((unexpected_behavior + 1))
+fi
+
+total_tests=$((total_tests + 1))
+below_min_query_params=$((MIN_QUERY_PARAM_COUNT - 1))
+declare -a few_query_params_array
+for i in $(seq 1 $below_min_query_params); do
+  few_query_params_array+=("param$i=value$i")
+done
+few_query_params_string=$(IFS='&'; echo "${few_query_params_array[*]}")
+few_query_params_status=$(run_test "Query Params - Below Min" "$SERVER_URL/normal?$few_query_params_string" GET "" "" "2.." "Should allow requests with fewer than the minimum number of query parameters ($MIN_QUERY_PARAM_COUNT).")
+if [[ ! "$few_query_params_status" =~ ^2[0-9]{2}$ ]]; then
+  printf "${RED}FAIL: Query Params - Below Min triggered WAF (non-2xx).${NC}\n"
+  unexpected_behavior=$((unexpected_behavior + 1))
+fi
+
+total_tests=$((total_tests + 1))
+at_max_query_params="$MAX_QUERY_PARAM_COUNT"
+declare -a at_max_query_params_array
+for i in $(seq 1 $at_max_query_params); do
+  at_max_query_params_array+=("param$i=value$i")
+done
+at_max_query_params_string=$(IFS='&'; echo "${at_max_query_params_array[*]}")
+at_max_query_params_status=$(run_test "Query Params - At Max Threshold" "$SERVER_URL/normal?$at_max_query_params_string" GET "" "" "2.." "Should allow requests with the maximum number of query parameters ($MAX_QUERY_PARAM_COUNT).")
+if [[ ! "$at_max_query_params_status" =~ ^2[0-9]{2}$ ]]; then
+    printf "${YELLOW}WARN: Query Params - At Max triggered WAF (non-2xx), check threshold configuration.${NC}\n"
+    unexpected_behavior=$((unexpected_behavior + 1))
+fi
+
+total_tests=$((total_tests + 1))
+just_below_max_query_params=$((MAX_QUERY_PARAM_COUNT - 1))
+declare -a just_below_max_query_params_array
+for i in $(seq 1 $just_below_max_query_params); do
+    just_below_max_query_params_array+=("param$i=value$i")
+done
+just_below_max_query_params_string=$(IFS='&'; echo "${just_below_max_query_params_array[*]}")
+just_below_max_query_params_status=$(run_test "Query Params - Just Below Max" "$SERVER_URL/normal?$just_below_max_query_params_string" GET "" "" "2.." "Should allow requests just below the maximum number of query parameters.")
+if [[ ! "$just_below_max_query_params_status" =~ ^2[0-9]{2}$ ]]; then
+    printf "${YELLOW}WARN: Query Params - Just Below Max unexpectedly blocked (non-2xx), check threshold configuration.${NC}\n"
+    unexpected_behavior=$((unexpected_behavior + 1))
+fi
+
+
+total_tests=$((total_tests + 1))
+at_min_query_params="$MIN_QUERY_PARAM_COUNT"
+declare -a at_min_query_params_array
+for i in $(seq 1 $at_min_query_params); do
+  at_min_query_params_array+=("param$i=value$i")
+done
+at_min_query_params_string=$(IFS='&'; echo "${at_min_query_params_array[*]}")
+at_min_query_params_status=$(run_test "Query Params - At Min Threshold" "$SERVER_URL/normal?$at_min_query_params_string" GET "" "" "2.." "Should allow requests with the minimum number of query parameters ($MIN_QUERY_PARAM_COUNT).")
+if [[ ! "$at_min_query_params_status" =~ ^2[0-9]{2}$ ]]; then
+    printf "${YELLOW}WARN: Query Params - At Min triggered WAF (non-2xx), check threshold configuration.${NC}\n"
+    unexpected_behavior=$((unexpected_behavior + 1))
+fi
+
+
+total_tests=$((total_tests + 1))
+just_above_min_query_params=$((MIN_QUERY_PARAM_COUNT + 1))
+declare -a just_above_min_query_params_array
+for i in $(seq 1 $just_above_min_query_params); do
+  just_above_min_query_params_array+=("param$i=value$i")
+done
+just_above_min_query_params_string=$(IFS='&'; echo "${just_above_min_query_params_array[*]}")
+just_above_min_query_params_status=$(run_test "Query Params - Just Above Min" "$SERVER_URL/normal?$just_above_min_query_params_string" GET "" "" "2.." "Should allow requests just above the minimum number of query parameters.")
+if [[ ! "$just_above_min_query_params_status" =~ ^2[0-9]{2}$ ]]; then
+    printf "${YELLOW}WARN: Query Params - Just Above Min unexpectedly blocked (non-2xx), check threshold configuration.${NC}\n"
+    unexpected_behavior=$((unexpected_behavior + 1))
+fi
+
+# --- Path Segment Count Tests ---
+total_tests=$((total_tests + 1))
+exceed_max_path_segments=$((MAX_PATH_SEGMENT_COUNT + 2))
+declare -a many_path_segments_array
+for i in $(seq 1 $exceed_max_path_segments); do
+   many_path_segments_array+=("segment$i")
+done
+many_path_segments_string=$(IFS='/'; echo "${many_path_segments_array[*]}")
+many_path_segments_status=$(run_test "Path Segments - Exceeding Max" "$SERVER_URL/$many_path_segments_string" GET "" "" "4.." "Should block requests with more than the maximum number of path segments ($MAX_PATH_SEGMENT_COUNT).")
+if [[ ! "$many_path_segments_status" =~ ^4[0-9]{2}$ ]]; then
+  printf "${RED}FAIL: Path Segments - Exceeding Max did NOT trigger WAF (non-4xx).${NC}\n"
+  unexpected_behavior=$((unexpected_behavior + 1))
+fi
+
+total_tests=$((total_tests + 1))
+below_min_path_segments=$((MIN_PATH_SEGMENT_COUNT - 1))
+declare -a few_path_segments_array
+for i in $(seq 1 $below_min_path_segments); do
+    few_path_segments_array+=("segment$i")
+done
+few_path_segments_string=$(IFS='/'; echo "${few_path_segments_array[*]}")
+few_path_segments_status=$(run_test "Path Segments - Below Min" "$SERVER_URL/$few_path_segments_string" GET "" "" "2.." "Should allow requests with fewer than the minimum number of path segments ($MIN_PATH_SEGMENT_COUNT).")
+if [[ ! "$few_path_segments_status" =~ ^2[0-9]{2}$ ]]; then
+  printf "${RED}FAIL: Path Segments - Below Min triggered WAF (non-2xx).${NC}\n"
+  unexpected_behavior=$((unexpected_behavior + 1))
+fi
+
+
+total_tests=$((total_tests + 1))
+at_max_path_segments="$MAX_PATH_SEGMENT_COUNT"
+declare -a at_max_path_segments_array
+for i in $(seq 1 $at_max_path_segments); do
+   at_max_path_segments_array+=("segment$i")
+done
+at_max_path_segments_string=$(IFS='/'; echo "${at_max_path_segments_array[*]}")
+at_max_path_segments_status=$(run_test "Path Segments - At Max Threshold" "$SERVER_URL/$at_max_path_segments_string" GET "" "" "2.." "Should allow requests with the maximum number of path segments ($MAX_PATH_SEGMENT_COUNT).")
+if [[ ! "$at_max_path_segments_status" =~ ^2[0-9]{2}$ ]]; then
+    printf "${YELLOW}WARN: Path Segments - At Max triggered WAF (non-2xx), check threshold configuration.${NC}\n"
+    unexpected_behavior=$((unexpected_behavior + 1))
+fi
+
+
+total_tests=$((total_tests + 1))
+just_below_max_path_segments=$((MAX_PATH_SEGMENT_COUNT - 1))
+declare -a just_below_max_path_segments_array
+for i in $(seq 1 $just_below_max_path_segments); do
+   just_below_max_path_segments_array+=("segment$i")
+done
+just_below_max_path_segments_string=$(IFS='/'; echo "${just_below_max_path_segments_array[*]}")
+just_below_max_path_segments_status=$(run_test "Path Segments - Just Below Max" "$SERVER_URL/$just_below_max_path_segments_string" GET "" "" "2.." "Should allow requests just below the maximum number of path segments.")
+if [[ ! "$just_below_max_path_segments_status" =~ ^2[0-9]{2}$ ]]; then
+    printf "${YELLOW}WARN: Path Segments - Just Below Max unexpectedly blocked (non-2xx), check threshold configuration.${NC}\n"
+    unexpected_behavior=$((unexpected_behavior + 1))
+fi
+
+total_tests=$((total_tests + 1))
+at_min_path_segments="$MIN_PATH_SEGMENT_COUNT"
+declare -a at_min_path_segments_array
+for i in $(seq 1 $at_min_path_segments); do
+    at_min_path_segments_array+=("segment$i")
+done
+at_min_path_segments_string=$(IFS='/'; echo "${at_min_path_segments_array[*]}")
+at_min_path_segments_status=$(run_test "Path Segments - At Min Threshold" "$SERVER_URL/$at_min_path_segments_string" GET "" "" "2.." "Should allow requests with the minimum number of path segments ($MIN_PATH_SEGMENT_COUNT).")
+if [[ ! "$at_min_path_segments_status" =~ ^2[0-9]{2}$ ]]; then
+    printf "${YELLOW}WARN: Path Segments - At Min triggered WAF (non-2xx), check threshold configuration.${NC}\n"
+    unexpected_behavior=$((unexpected_behavior + 1))
+fi
+
+
+total_tests=$((total_tests + 1))
+just_above_min_path_segments=$((MIN_PATH_SEGMENT_COUNT + 1))
+declare -a just_above_min_path_segments_array
+for i in $(seq 1 $just_above_min_path_segments); do
+   just_above_min_path_segments_array+=("segment$i")
+done
+just_above_min_path_segments_string=$(IFS='/'; echo "${just_above_min_path_segments_array[*]}")
+just_above_min_path_segments_status=$(run_test "Path Segments - Just Above Min" "$SERVER_URL/$just_above_min_path_segments_string" GET "" "" "2.." "Should allow requests just above the minimum number of path segments.")
+if [[ ! "$just_above_min_path_segments_status" =~ ^2[0-9]{2}$ ]]; then
+    printf "${YELLOW}WARN: Path Segments - Just Above Min unexpectedly blocked (non-2xx), check threshold configuration.${NC}\n"
+    unexpected_behavior=$((unexpected_behavior + 1))
+fi
+
+# --- Test Summary ---
 printf "${YELLOW}--- Test Summary ---${NC}\n"
 echo "Total Tests Run: $total_tests"
 printf "Tests with Unexpected WAF Behavior: ${RED}%d${NC}\n" "$unexpected_behavior"
@@ -276,27 +452,4 @@ if [ "$total_tests" -gt 0 ]; then
 fi
 echo
 
-# Removing the detailed test results section
-# printf "${YELLOW}--- Detailed Test Results ---${NC}\n"
-# printf "Baseline - Normal GET: Status Code: %s\n" "$baseline_status"
-# printf "Request Size - Exceeding Max: Status Code: %s\n" "$large_request_status"
-# printf "Request Size - Below Min: Status Code: %s\n" "$small_request_status"
-# printf "Request Size - At Max Threshold: Status Code: %s\n" "$at_max_request_status"
-# printf "Request Size - Just Below Max: Status Code: %s\n" "$just_below_max_status"
-# printf "Request Size - At Min Threshold: Status Code: %s\n" "$at_min_request_status"
-# printf "Request Size - Just Above Min: Status Code: %s\n" "$just_above_min_status"
-# printf "Header Count - Exceeding Max: Status Code: %s\n" "$many_headers_status"
-# printf "Header Count - Below Min: Status Code: %s\n" "$few_headers_status"
-# printf "Header Count - At Max Threshold: Status Code: %s\n" "$at_max_headers_status"
-# printf "Header Count - Just Below Max: Status Code: %s\n" "$just_below_max_headers_status"
-# printf "Header Count - At Min Threshold: Status Code: %s\n" "$at_min_headers_status"
-# printf "Header Count - Just Above Min: Status Code: %s\n" "$just_above_min_headers_status"
-# printf "Combined - Large Request and Many Headers: Status Code: %s\n" "$large_and_many_status"
-# printf "Potentially Malicious Path: Status Code: %s\n" "$malicious_path_status"
-# printf "Non-Existent Path: Status Code: %s\n" "$nonexistent_path_status"
-# printf "HTTP Method - PUT: Status Code: %s\n" "$put_test_status"
-# printf "HTTP Method - DELETE: Status Code: %s\n" "$delete_test_status"
-# printf "Headers - Unusual Characters: Status Code: %s\n" "$unusual_header_status"
-# printf "Headers - Long Value: Status Code: %s\n" "$long_header_status"
-
-printf "\n${CYAN}Tests completed. Review the summary and detailed results, especially ${RED}FAIL${NC} and ${YELLOW}WARN${NC} messages.${NC}\n"
+printf "\n${CYAN}Tests completed. Review the summary, especially ${RED}FAIL${NC} and ${YELLOW}WARN${NC} messages.${NC}\n"
