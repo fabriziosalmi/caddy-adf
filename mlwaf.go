@@ -1,4 +1,4 @@
-package caddymlf
+package github.com/fabriziosalmi/caddymlf
 
 import (
 	"fmt"
