@@ -2,6 +2,7 @@ package caddymlf
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -186,45 +187,60 @@ func (rw *responseWriterWrapper) WriteHeader(statusCode int) {
 func (m *MLWAF) calculateAnomalyScore(requestSize int64, headerCount int, queryParamCount int, pathSegmentCount int, history []requestRecord) float64 {
 	score := 0.0
 
-	// Base anomaly score calculation (same as before)
-	if m.RequestSizeWeight > 0 {
-		if m.NormalRequestSizeRangeMin > 0 && requestSize < int64(m.NormalRequestSizeRangeMin) {
-			score += m.RequestSizeWeight * float64(m.NormalRequestSizeRangeMin-int(requestSize)) / float64(m.NormalRequestSizeRangeMin)
-		} else if m.NormalRequestSizeRangeMax > 0 && requestSize > int64(m.NormalRequestSizeRangeMax) {
-			score += m.RequestSizeWeight * float64(int(requestSize)-m.NormalRequestSizeRangeMax) / float64(m.NormalRequestSizeRangeMax)
+	// Helper function to normalize
+	normalize := func(value float64, min float64, max float64) float64 {
+		if value < min {
+			return (min - value) / (min) // Normalize to 0-1, assuming min is not zero
+		} else if value > max {
+			return (value - max) / (max) // Normalize to 0-1, assuming max is not zero
 		}
+		return 0.0
+	}
+
+	if m.RequestSizeWeight > 0 {
+		var normalizedRequestSize float64 = 0.0
+		if m.NormalRequestSizeRangeMin > 0 && m.NormalRequestSizeRangeMax > 0 {
+			normalizedRequestSize = normalize(float64(requestSize), float64(m.NormalRequestSizeRangeMin), float64(m.NormalRequestSizeRangeMax))
+		}
+		score += m.RequestSizeWeight * normalizedRequestSize
 	}
 
 	if m.HeaderCountWeight > 0 {
-		if m.NormalHeaderCountMin > 0 && headerCount < m.NormalHeaderCountMin {
-			score += m.HeaderCountWeight * float64(m.NormalHeaderCountMin-headerCount) / float64(m.NormalHeaderCountMin)
-		} else if m.NormalHeaderCountMax > 0 && headerCount > m.NormalHeaderCountMax {
-			score += m.HeaderCountWeight * float64(headerCount-m.NormalHeaderCountMax) / float64(m.NormalHeaderCountMax)
+		var normalizedHeaderCount float64 = 0.0
+		if m.NormalHeaderCountMin > 0 && m.NormalHeaderCountMax > 0 {
+			normalizedHeaderCount = normalize(float64(headerCount), float64(m.NormalHeaderCountMin), float64(m.NormalHeaderCountMax))
 		}
+		score += m.HeaderCountWeight * normalizedHeaderCount
 	}
 
 	if m.QueryParamCountWeight > 0 {
-		if m.NormalQueryParamCountMin > 0 && queryParamCount < m.NormalQueryParamCountMin {
-			score += m.QueryParamCountWeight * float64(m.NormalQueryParamCountMin-queryParamCount) / float64(m.NormalQueryParamCountMin)
-		} else if m.NormalQueryParamCountMax > 0 && queryParamCount > m.NormalQueryParamCountMax {
-			score += m.QueryParamCountWeight * float64(queryParamCount-m.NormalQueryParamCountMax) / float64(m.NormalQueryParamCountMax)
+		var normalizedQueryParamCount float64 = 0.0
+		if m.NormalQueryParamCountMin > 0 && m.NormalQueryParamCountMax > 0 {
+			normalizedQueryParamCount = normalize(float64(queryParamCount), float64(m.NormalQueryParamCountMin), float64(m.NormalQueryParamCountMax))
 		}
+		score += m.QueryParamCountWeight * normalizedQueryParamCount
 	}
 
 	if m.PathSegmentCountWeight > 0 {
-		if m.NormalPathSegmentCountMin > 0 && pathSegmentCount < m.NormalPathSegmentCountMin {
-			score += m.PathSegmentCountWeight * float64(m.NormalPathSegmentCountMin-pathSegmentCount) / float64(m.NormalPathSegmentCountMin)
-		} else if m.NormalPathSegmentCountMax > 0 && pathSegmentCount > m.NormalPathSegmentCountMax {
-			score += m.PathSegmentCountWeight * float64(pathSegmentCount-m.NormalPathSegmentCountMax) / float64(m.NormalPathSegmentCountMax)
+		var normalizedPathSegmentCount float64 = 0.0
+		if m.NormalPathSegmentCountMin > 0 && m.NormalPathSegmentCountMax > 0 {
+			normalizedPathSegmentCount = normalize(float64(pathSegmentCount), float64(m.NormalPathSegmentCountMin), float64(m.NormalPathSegmentCountMax))
 		}
+		score += m.PathSegmentCountWeight * normalizedPathSegmentCount
 	}
 
 	// Apply correlation logic based on request history
+	correlationScore := 0.0
 	for _, record := range history {
+		timeDiff := time.Since(record.Timestamp).Seconds()
 		if record.AnomalyScore >= m.AnomalyThreshold {
-			score += 0.5 // Example: Increase score if previous requests were suspicious
+			timeWeight := math.Exp(-timeDiff / 60) // decay exponentially over 60 seconds
+			severityWeight := record.AnomalyScore / m.BlockingThreshold
+
+			correlationScore += 0.15 * timeWeight * severityWeight
 		}
 	}
+	score += correlationScore
 
 	return score
 }
