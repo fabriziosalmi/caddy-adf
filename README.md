@@ -70,18 +70,18 @@ To use the `caddy-mlf` module, you need to configure it within your Caddyfile. T
 :8080 {
     handle {
         ml_waf {
-            anomaly_threshold 0.6
-            blocking_threshold 0.9
-            normal_request_size_range 100 1000
-            normal_header_count_range 5 20
-            normal_query_param_count_range 0 5
-            normal_path_segment_count_range 1 3
-            request_size_weight 0.8
-            header_count_weight 0.7
-            query_param_count_weight 0.6
-            path_segment_count_weight 0.5
-            history_window 5m
-            max_history_entries 20
+             anomaly_threshold 0.7   # Increased
+             blocking_threshold 0.95  # Increased significantly
+             normal_request_size_range 50 2000  # Widened
+             normal_header_count_range 3 25    # Widened
+             normal_query_param_count_range 0 8   # Widened
+             normal_path_segment_count_range 1 4   # Widened
+             request_size_weight 0.6   # Decreased
+             header_count_weight 0.5   # Decreased
+             query_param_count_weight 0.4   # Decreased
+             path_segment_count_weight 0.3   # Decreased
+             history_window 10m      # Increased
+             max_history_entries 30    # Increased
         }
         respond "Hello, world!"
     }
