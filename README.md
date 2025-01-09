@@ -43,11 +43,11 @@ To install the `caddy-mlf` module, you'll need to build Caddy with this module i
     ```bash
     go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
 
-   go get github.com/caddyserver/caddy/v2/cmd@v2.9.1
-   go get github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile@v2.9.1
-   go get github.com/caddyserver/caddy/v2/modules/caddyhttp@v2.9.1
-   go get github.com/caddyserver/caddy/v2/modules/caddypki@v2.9.1
-   go get github.com/caddyserver/caddy/v2/modules/caddytls@v2.9.1
+    go get github.com/caddyserver/caddy/v2/cmd@v2.9.1
+    go get github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile@v2.9.1
+    go get github.com/caddyserver/caddy/v2/modules/caddyhttp@v2.9.1
+    go get github.com/caddyserver/caddy/v2/modules/caddypki@v2.9.1
+    go get github.com/caddyserver/caddy/v2/modules/caddytls@v2.9.1
 
     ```
 
