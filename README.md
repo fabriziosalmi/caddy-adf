@@ -70,18 +70,18 @@ To use the `caddy-mlf` module, you need to configure it within your Caddyfile. T
 :8080 {
     handle {
         ml_waf {
-             anomaly_threshold 0.7   # Increased
-             blocking_threshold 0.95  # Increased significantly
-             normal_request_size_range 50 2000  # Widened
-             normal_header_count_range 3 25    # Widened
-             normal_query_param_count_range 0 8   # Widened
-             normal_path_segment_count_range 1 4   # Widened
-             request_size_weight 0.6   # Decreased
-             header_count_weight 0.5   # Decreased
-             query_param_count_weight 0.4   # Decreased
-             path_segment_count_weight 0.3   # Decreased
-             history_window 10m      # Increased
-             max_history_entries 30    # Increased
+            anomaly_threshold 0.7                  # Anomaly score above which traffic is marked as suspicious
+            blocking_threshold 0.95                # Anomaly score above which traffic is blocked
+            normal_request_size_range 50 2000      # Min and max size (in bytes) of a normal request
+            normal_header_count_range 3 30         # Min and max number of headers in a normal request
+            normal_query_param_count_range 0 10    # Min and max number of query parameters in a normal request
+            normal_path_segment_count_range 1 5    # Min and max number of path segments in a normal request
+            request_size_weight 0.4                # Weight given to deviations in request size
+            header_count_weight 0.3                # Weight given to deviations in header count
+            query_param_count_weight 0.2           # Weight given to deviations in query parameter count
+            path_segment_count_weight 0.1          # Weight given to deviations in path segment count
+            history_window 10m                     # Time window for considering past requests (e.g., 5m, 1h)
+            max_history_entries 30                 # Maximum number of past requests to keep in history
         }
         respond "Hello, world!"
     }
