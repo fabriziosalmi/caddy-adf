@@ -1,4 +1,4 @@
-package caddymlf
+package caddyadf
 
 import (
 	"fmt"
