@@ -303,27 +303,94 @@ ml_waf {
 
 ### Tuning Weights
 
-The `caddy-mlf` module uses weights to determine the contribution of different request attributes to the anomaly score. Adjust these weights to prioritize certain aspects of your traffic:
+The `caddy-mlf` module uses weights to determine the contribution of different request attributes to the anomaly score. These weights allow you to customize the module's sensitivity to various aspects of incoming requests. Effective weight tuning is crucial for achieving a balance between security and usability.
 
--   **Increase weights** for attributes that are more indicative of malicious activity for your application.
--   **Decrease weights** for attributes that are less relevant to security in your specific scenario.
--   Make sure the total of weights sums up to a reasonable value for your scoring needs.
+-   **Increase weights** for attributes that are more indicative of malicious activity for your application. For example:
+    *   If your application is often targeted by brute-force attacks with large request sizes, increase `request_size_weight`.
+    *   If you see attacks using unusual headers, increase `header_count_weight`.
+    *   If you have an API with a well defined set of methods, increase `http_method_weight`.
+    *    If your legitimate users use well-known user-agents, increase `user_agent_weight`
+-   **Decrease weights** for attributes that are less relevant to security in your specific scenario. For example:
+    *   If your application handles a lot of large data uploads that are not typically malicious, decrease `request_size_weight`.
+    *   If you have a lot of legitimate requests with varying numbers of query parameters, decrease `query_param_count_weight`.
+-   **Start with small values:** When tuning weights, start with small adjustments and monitor how these changes affect your anomaly scores. Don't make drastic changes immediately.
+-   **Normalize your weights:** While not strictly required, consider normalizing your weights so that their total is a manageable number (e.g., summing up to 1.0 or 100). This can make it easier to reason about how much influence each attribute has on the total score. For example, if you want request size to be half of the score and header count the other half, you can set both to `0.5` (assuming other weights are zeroed or are less important).
+
+    ```caddyfile
+    ml_waf {
+        request_size_weight  0.5  # Emphasize request size
+        header_count_weight  0.3  # Emphasize header count
+        query_param_count_weight 0.1
+        path_segment_count_weight 0.1
+        # ... other weights
+    }
+    ```
 
 ### Fine-Tuning Thresholds
 
--   **Start with conservative thresholds:** Begin with higher `anomaly_threshold` and `blocking_threshold` values to minimize false positives.
--   **Monitor logs:** Regularly check your Caddy logs for suspicious requests or blocked requests.
--   **Adjust incrementally:** Fine-tune the thresholds gradually based on the observed behavior.
--   **Use per-path configurations** to apply tighter rules to more sensitive parts of your application.
+Thresholds determine when a request is considered suspicious or is blocked. Setting these values correctly is vital for minimizing false positives and false negatives.
+
+-   **Start with conservative thresholds:** Begin with higher `anomaly_threshold` and `blocking_threshold` values to minimize false positives. This means that initially, the module will only flag or block highly unusual requests. For example, you might set an `anomaly_threshold` of `0.6` and `blocking_threshold` of `0.8` initially, and gradually reduce these as needed.
+
+    ```caddyfile
+     ml_waf {
+       anomaly_threshold 0.6
+       blocking_threshold 0.8
+       # ... other options
+     }
+     ```
+
+-   **Monitor logs:** Regularly check your Caddy logs (especially in `debug` mode) for suspicious requests or blocked requests. This will give you data to understand if you need to adjust your thresholds. Pay particular attention to the anomaly score and the context of each request.
+-   **Adjust incrementally:** Fine-tune the thresholds gradually based on the observed behavior. For example:
+    *   If you see too many legitimate requests marked as suspicious, lower your `anomaly_threshold`.
+    *   If you see malicious requests getting through, lower your `blocking_threshold`.
+-   **Use per-path configurations** to apply tighter rules to more sensitive parts of your application. For instance:
+
+     ```caddyfile
+        ml_waf {
+            anomaly_threshold 0.4      # Global settings
+            blocking_threshold 0.7
+
+            per_path_config /admin {
+                anomaly_threshold 0.1   # Stricter settings for /admin path
+                blocking_threshold 0.2
+            }
+        }
+    ```
+
+- **Consider environment:** The right thresholds might depend on your environment and application. A more security-critical application might require lower thresholds and more aggressive rules compared to a low-impact application.
 
 ### Understanding Request History
 
-The request history mechanism helps to identify patterns of attack and correlate suspicious behavior over time. Here's how to best utilize it:
+The request history mechanism helps to identify patterns of attack and correlate suspicious behavior over time. It allows the module to adapt and flag continuous patterns of malicious traffic coming from the same IPs. Here's how to best utilize it:
 
--   **`history_window`:** Set this value based on your observation window. If your application needs quick reaction times, shorten the window. For slower patterns, keep a longer window.
+-   **`history_window`:** Set this value based on your observation window. If your application needs quick reaction times to attacks that occur in short bursts, shorten the window. For slower attacks (like scanning activities or low-frequency brute-force attempts), keep a longer window.
+    *   **Short Window (e.g., 1-5 minutes):** Suitable for quickly detecting and reacting to sudden spikes in activity, such as brute-force login attempts.
+        ```caddyfile
+        ml_waf {
+            history_window 2m
+            # ... other options
+        }
+        ```
+    *   **Longer Window (e.g., 10+ minutes):** Better for detecting distributed attacks or slow scanning behavior that might not be obvious over a short time.
+    ```caddyfile
+         ml_waf {
+             history_window 20m
+             # ... other options
+         }
+    ```
 -   **`max_history_entries`:** Adjust the number of entries based on traffic volume and your system's memory capabilities.
--   **Monitor:** Keep an eye on your logs, where information about the history and anomaly score of every request is logged using the debug level.
-
+    *   **Lower values:** Use lower values when dealing with high traffic to avoid high memory usage. This will keep the memory footprint small.
+    *   **Higher values:** Use higher values if you have low traffic and want to be able to track more requests. This is useful when looking for very specific attack patterns. Be aware that this can consume more memory.
+        ```caddyfile
+            ml_waf {
+                max_history_entries 500
+                # ... other options
+            }
+        ```
+-   **Monitor:** Keep an eye on your logs, where information about the history and anomaly score of every request is logged using the `debug` level. Look for patterns in anomaly scores over time for specific IPs to get insights into the behavior of potential attackers.
+- **Adjust history along with request frequency:** When you tune `request_frequency_weight`, you should adjust `history_window` and `max_history_entries` to match your expected traffic and attack patterns. A very high `request_frequency_weight` will probably need a lower history window, and less entries.
+  
 ## 8. Troubleshooting
 
 ### Detailed Debugging
