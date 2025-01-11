@@ -32,6 +32,7 @@ A Caddy module implementing a simulated Machine Learning Web Application Firewal
     *   [`history_window`](#history_window)
     *   [`max_history_entries`](#max_history_entries)
 *   [How It Works](#how-it-works)
+*   [Use cases](#use-cases)
 *   [Contributing](#contributing)
 *   [License](#license)
 
@@ -357,6 +358,151 @@ The `caddy-mlf` module operates as follows:
 5. Allows non-suspicious requests to proceed to the next middleware or handler in the chain.
 
 This flow ensures that requests are evaluated in real-time, with decisions based on both individual attributes and contextual patterns from recent activity. By maintaining a history of request patterns, the module is able to detect evolving threats and react dynamically to anomalous behavior.
+
+## Use cases
+
+The `caddy-mlf` module can be configured to detect and respond to a variety of web-based attacks. Below are some common attack scenarios and example configurations to help you tailor the module to your specific security needs.
+
+### 1. **Detecting and Blocking SQL Injection Attacks**
+SQL injection attacks often involve unusual query parameters or payloads in the request. You can configure `caddy-mlf` to detect such anomalies by setting strict limits on query parameters and request sizes.
+
+```caddy
+ml_waf {
+    anomaly_threshold 0.7
+    blocking_threshold 0.9
+
+    normal_request_size_range 100 2000
+    normal_query_param_count_range 0 5
+
+    query_param_count_weight 0.4
+    request_size_weight 0.3
+
+    history_window 5m
+    max_history_entries 50
+}
+```
+
+**Explanation:**
+- **`normal_query_param_count_range 0 5`**: Limits the number of query parameters to a maximum of 5, which is typical for most legitimate requests.
+- **`query_param_count_weight 0.4`**: Assigns a high weight to query parameter count deviations, making it a significant factor in anomaly detection.
+- **`request_size_weight 0.3`**: Ensures that unusually large requests (which may contain SQL injection payloads) are flagged.
+
+### 2. **Mitigating Cross-Site Scripting (XSS) Attacks**
+XSS attacks often involve malicious scripts embedded in request headers or parameters. You can configure `caddy-mlf` to detect anomalies in header counts and user agents.
+
+```caddy
+ml_waf {
+    anomaly_threshold 0.6
+    blocking_threshold 0.85
+
+    normal_header_count_range 5 20
+    normal_user_agents Chrome Firefox Safari
+
+    header_count_weight 0.35
+    user_agent_weight 0.3
+
+    history_window 10m
+    max_history_entries 100
+}
+```
+
+**Explanation:**
+- **`normal_header_count_range 5 20`**: Sets a reasonable range for the number of headers in a request.
+- **`normal_user_agents Chrome Firefox Safari`**: Only allows requests from common browsers, blocking requests with unusual or malicious User-Agent strings.
+- **`header_count_weight 0.35`**: Assigns a high weight to header count deviations, which can indicate XSS payloads in headers.
+- **`user_agent_weight 0.3`**: Ensures that requests with suspicious User-Agent strings are flagged.
+
+### 3. **Preventing Brute Force Attacks**
+Brute force attacks involve a high volume of requests from the same IP address in a short period. You can configure `caddy-mlf` to detect and block such behavior by leveraging the request history feature.
+
+```caddy
+ml_waf {
+    anomaly_threshold 0.8
+    blocking_threshold 0.95
+
+    history_window 1m
+    max_history_entries 20
+
+    request_size_weight 0.2
+    header_count_weight 0.2
+    query_param_count_weight 0.2
+    path_segment_count_weight 0.2
+    http_method_weight 0.1
+    user_agent_weight 0.1
+}
+```
+
+**Explanation:**
+- **`history_window 1m`**: Analyzes requests from the last minute to detect high-frequency patterns.
+- **`max_history_entries 20`**: Limits the number of requests from a single IP address within the history window.
+- **Low weights for individual attributes**: Focuses more on the frequency of requests rather than their content, which is typical for brute force attacks.
+
+### 4. **Detecting Path Traversal Attacks**
+Path traversal attacks involve unusual path segments in the URL. You can configure `caddy-mlf` to detect such anomalies by setting strict limits on the number of path segments.
+
+```caddy
+ml_waf {
+    anomaly_threshold 0.75
+    blocking_threshold 0.9
+
+    normal_path_segment_count_range 1 4
+
+    path_segment_count_weight 0.5
+    request_size_weight 0.2
+    header_count_weight 0.2
+    query_param_count_weight 0.1
+}
+```
+
+**Explanation:**
+- **`normal_path_segment_count_range 1 4`**: Limits the number of path segments to a maximum of 4, which is typical for most legitimate requests.
+- **`path_segment_count_weight 0.5`**: Assigns a high weight to path segment count deviations, making it a significant factor in anomaly detection.
+- **`request_size_weight 0.2` and `header_count_weight 0.2`**: Ensures that other attributes are also considered, but with less emphasis.
+
+### 5. **Blocking Unusual HTTP Methods**
+Some attacks involve the use of uncommon HTTP methods (e.g., `PUT`, `DELETE`, `TRACE`). You can configure `caddy-mlf` to allow only specific HTTP methods and block the rest.
+
+```caddy
+ml_waf {
+    anomaly_threshold 0.7
+    blocking_threshold 0.9
+
+    normal_http_methods GET POST
+
+    http_method_weight 0.4
+    request_size_weight 0.2
+    header_count_weight 0.2
+    query_param_count_weight 0.1
+    path_segment_count_weight 0.1
+}
+```
+
+**Explanation:**
+- **`normal_http_methods GET POST`**: Only allows `GET` and `POST` requests, blocking other methods that are often used in attacks.
+- **`http_method_weight 0.4`**: Assigns a high weight to HTTP method deviations, making it a significant factor in anomaly detection.
+- **Lower weights for other attributes**: Ensures that the focus is primarily on the HTTP method.
+
+### 6. **Detecting Malicious Referrers**
+Some attacks involve requests with suspicious or spoofed Referrer headers. You can configure `caddy-mlf` to allow only specific referrers and block the rest.
+
+```caddy
+ml_waf {
+    anomaly_threshold 0.7
+    blocking_threshold 0.9
+
+    normal_referrers https://trustedsite.com https://anothertrustedsite.com
+
+    referrer_weight 0.5
+    request_size_weight 0.2
+    header_count_weight 0.2
+    query_param_count_weight 0.1
+}
+```
+
+**Explanation:**
+- **`normal_referrers https://trustedsite.com https://anothertrustedsite.com`**: Only allows requests from trusted referrers.
+- **`referrer_weight 0.5`**: Assigns a high weight to Referrer header deviations, making it a significant factor in anomaly detection.
+- **Lower weights for other attributes**: Ensures that the focus is primarily on the Referrer header.
 
 ## Contributing
 
