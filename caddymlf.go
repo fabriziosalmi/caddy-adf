@@ -24,30 +24,30 @@ func init() {
 
 // MLWAF implements a simulated Machine Learning WAF middleware with request correlation.
 type MLWAF struct {
-	AnomalyThreshold          float64       `json:"anomaly_threshold,omitempty"`
-	BlockingThreshold         float64       `json:"blocking_threshold,omitempty"`
-	NormalRequestSizeRangeMin int           `json:"normal_request_size_min,omitempty"`
-	NormalRequestSizeRangeMax int           `json:"normal_request_size_max,omitempty"`
-	NormalHeaderCountMin      int           `json:"normal_header_count_min,omitempty"`
-	NormalHeaderCountMax      int           `json:"normal_header_count_max,omitempty"`
-	NormalQueryParamCountMin  int           `json:"normal_query_param_count_min,omitempty"`
-	NormalQueryParamCountMax  int           `json:"normal_query_param_count_max,omitempty"`
-	NormalPathSegmentCountMin int           `json:"normal_path_segment_count_min,omitempty"`
-	NormalPathSegmentCountMax int           `json:"normal_path_segment_count_max,omitempty"`
-	RequestSizeWeight         float64       `json:"request_size_weight,omitempty"`
-	HeaderCountWeight         float64       `json:"header_count_weight,omitempty"`
-	QueryParamCountWeight     float64       `json:"query_param_count_weight,omitempty"`
-	PathSegmentCountWeight    float64       `json:"path_segment_count_weight,omitempty"`
-	HistoryWindow             time.Duration `json:"history_window,omitempty"`
-	MaxHistoryEntries         int           `json:"max_history_entries,omitempty"`
-	NormalHTTPMethods         []string      `json:"normal_http_methods,omitempty"` // Allowed HTTP methods
-	NormalUserAgents          []string      `json:"normal_user_agents,omitempty"`  // Allowed User-Agent strings
-	NormalReferrers           []string      `json:"normal_referrers,omitempty"`    // Allowed Referrer headers
-	HTTPMethodWeight          float64       `json:"http_method_weight,omitempty"`  // Weight for HTTP method
-	UserAgentWeight           float64       `json:"user_agent_weight,omitempty"`   // Weight for User-Agent
-	ReferrerWeight            float64       `json:"referrer_weight,omitempty"`     // Weight for Referrer
-
-	PerPathConfig map[string]PathConfig `json:"per_path_config,omitempty"` // Per-path configurations
+	AnomalyThreshold          float64               `json:"anomaly_threshold,omitempty"`
+	BlockingThreshold         float64               `json:"blocking_threshold,omitempty"`
+	NormalRequestSizeRangeMin int                   `json:"normal_request_size_min,omitempty"`
+	NormalRequestSizeRangeMax int                   `json:"normal_request_size_max,omitempty"`
+	NormalHeaderCountMin      int                   `json:"normal_header_count_min,omitempty"`
+	NormalHeaderCountMax      int                   `json:"normal_header_count_max,omitempty"`
+	NormalQueryParamCountMin  int                   `json:"normal_query_param_count_min,omitempty"`
+	NormalQueryParamCountMax  int                   `json:"normal_query_param_count_max,omitempty"`
+	NormalPathSegmentCountMin int                   `json:"normal_path_segment_count_min,omitempty"`
+	NormalPathSegmentCountMax int                   `json:"normal_path_segment_count_max,omitempty"`
+	RequestSizeWeight         float64               `json:"request_size_weight,omitempty"`
+	HeaderCountWeight         float64               `json:"header_count_weight,omitempty"`
+	QueryParamCountWeight     float64               `json:"query_param_count_weight,omitempty"`
+	PathSegmentCountWeight    float64               `json:"path_segment_count_weight,omitempty"`
+	RequestFrequencyWeight    float64               `json:"request_frequency_weight,omitempty"` // New weight for request frequency
+	HistoryWindow             time.Duration         `json:"history_window,omitempty"`
+	MaxHistoryEntries         int                   `json:"max_history_entries,omitempty"`
+	NormalHTTPMethods         []string              `json:"normal_http_methods,omitempty"`
+	NormalUserAgents          []string              `json:"normal_user_agents,omitempty"`
+	NormalReferrers           []string              `json:"normal_referrers,omitempty"`
+	HTTPMethodWeight          float64               `json:"http_method_weight,omitempty"`
+	UserAgentWeight           float64               `json:"user_agent_weight,omitempty"`
+	ReferrerWeight            float64               `json:"referrer_weight,omitempty"`
+	PerPathConfig             map[string]PathConfig `json:"per_path_config,omitempty"`
 
 	requestHistory map[string][]requestRecord
 	historyMutex   sync.Mutex
@@ -99,6 +99,9 @@ func (m *MLWAF) Validate() error {
 	}
 	if m.PathSegmentCountWeight < 0 {
 		return fmt.Errorf("path_segment_count_weight cannot be negative")
+	}
+	if m.RequestFrequencyWeight < 0 {
+		return fmt.Errorf("request_frequency_weight cannot be negative")
 	}
 
 	// Validate ranges
@@ -224,8 +227,8 @@ func (m *MLWAF) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp
 		zap.Int("path_segment_count", pathSegmentCount),
 		zap.String("user_agent", userAgent),
 		zap.String("referrer", referrer),
-		zap.Any("headers", sanitizedHeaders),          // Log sanitized headers
-		zap.Any("query_params", sanitizedQueryParams), // Log sanitized query parameters
+		zap.Any("headers", sanitizedHeaders),
+		zap.Any("query_params", sanitizedQueryParams),
 	)
 
 	// Fix race condition: Protect access to requestHistory
@@ -485,6 +488,19 @@ func (m *MLWAF) calculateAnomalyScore(requestSize int64, headerCount int, queryP
 		}
 	}
 
+	// Calculate score for request frequency
+	if m.RequestFrequencyWeight > 0 && len(history) > 0 {
+		timeWindow := m.HistoryWindow.Seconds()
+		requestCount := float64(len(history))
+		frequency := requestCount / timeWindow
+		score += m.RequestFrequencyWeight * frequency
+		m.logger.Debug("request frequency contribution to anomaly score",
+			zap.Float64("frequency", frequency),
+			zap.Float64("weight", m.RequestFrequencyWeight),
+			zap.Float64("contribution", m.RequestFrequencyWeight*frequency),
+		)
+	}
+
 	// Apply correlation logic based on request history
 	correlationScore := 0.0
 	for _, record := range history {
@@ -651,6 +667,15 @@ func (m *MLWAF) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					return d.Errf("parsing path_segment_count_weight: %v", err)
 				}
 				m.PathSegmentCountWeight = val
+			case "request_frequency_weight":
+				if !d.NextArg() {
+					return d.ArgErr()
+				}
+				val, err := strconv.ParseFloat(d.Val(), 64)
+				if err != nil {
+					return d.Errf("parsing request_frequency_weight: %v", err)
+				}
+				m.RequestFrequencyWeight = val
 			case "history_window":
 				if !d.NextArg() {
 					return d.ArgErr()
@@ -760,6 +785,7 @@ func parseMLWAFCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, e
 		HeaderCountWeight:      1.0,
 		QueryParamCountWeight:  1.0,
 		PathSegmentCountWeight: 1.0,
+		RequestFrequencyWeight: 1.0,             // Default weight for request frequency
 		HistoryWindow:          1 * time.Minute, // Default history window
 		MaxHistoryEntries:      10,              // Default max history entries
 	}
