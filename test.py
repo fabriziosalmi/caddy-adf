@@ -1,243 +1,152 @@
 import requests
-from colorama import Fore, Style, init
+import argparse
+from termcolor import colored
+from collections import Counter
 
-# Initialize colorama
-init(autoreset=True)
+# Parse command-line arguments
+def parse_args():
+    parser = argparse.ArgumentParser(description="Enhanced Caddy WAF Testing Script with Metrics")
+    parser.add_argument(
+        "--host", required=True, help="The host URL of the WAF (e.g., http://localhost:8080)"
+    )
+    parser.add_argument(
+        "--num-tests", type=int, required=True, help="Total number of test cases to generate"
+    )
+    return parser.parse_args()
 
-# Base URL of the Caddy server
-BASE_URL = "http://localhost:8082"
+# Generate test cases with flexible distribution
+def generate_test_cases(num_tests):
+    test_cases = []
+    tests_per_level = num_tests // 10
+    extra_tests = num_tests % 10  # Leftover tests to distribute
 
-# Test cases
-test_cases = [
-    {
-        "name": "Normal GET request",
-        "method": "GET",
-        "url": BASE_URL,
-        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com"},
-        "params": {"param1": "value1"},
-        "expected_status": 200,
-    },
-    {
-        "name": "Normal POST request",
-        "method": "POST",
-        "url": BASE_URL,
-        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com", "Content-Type": "application/json"},
-        "data": '{"key": "value"}',
-        "expected_status": 200,
-    },
-    {
-        "name": "Large request size (blocked)",
-        "method": "POST",
-        "url": BASE_URL,
-        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com"},
-        "data": "a" * 3000,  # Exceeds normal_request_size_range
-        "expected_status": 403,
-    },
-    {
-        "name": "Too many headers (blocked)",
-        "method": "GET",
-        "url": BASE_URL,
-        "headers": {f"Header-{i}": "value" for i in range(30)},  # Exceeds normal_header_count_range
-        "expected_status": 403,
-    },
-    {
-        "name": "Unusual HTTP method (blocked)",
-        "method": "PUT",  # Not in normal_http_methods
-        "url": BASE_URL,
-        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com"},
-        "expected_status": 403,
-    },
-    {
-        "name": "Unusual User-Agent (blocked)",
-        "method": "GET",
-        "url": BASE_URL,
-        "headers": {"User-Agent": "BadBot", "Referer": "https://example.com"},
-        "expected_status": 403,
-    },
-    {
-        "name": "Unusual Referrer (blocked)",
-        "method": "GET",
-        "url": BASE_URL,
-        "headers": {"User-Agent": "Chrome", "Referer": "https://malicious.com"},
-        "expected_status": 403,
-    },
-    {
-        "name": "Too many query parameters (blocked)",
-        "method": "GET",
-        "url": BASE_URL,
-        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com"},
-        "params": {f"param{i}": "value" for i in range(10)},  # Exceeds normal_query_param_count_range
-        "expected_status": 403,
-    },
-    {
-        "name": "Too many path segments (blocked)",
-        "method": "GET",
-        "url": f"{BASE_URL}/segment1/segment2/segment3/segment4/segment5/segment6",  # Exceeds normal_path_segment_count_range
-        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com"},
-        "expected_status": 403,
-    },
-    {
-        "name": "Empty request body",
-        "method": "POST",
-        "url": BASE_URL,
-        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com", "Content-Type": "application/json"},
-        "data": "",  # Empty body
-        "expected_status": 200,  # or 403 if empty body is considered suspicious
-    },
-    {
-        "name": "Malformed JSON body",
-        "method": "POST",
-        "url": BASE_URL,
-        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com", "Content-Type": "application/json"},
-        "data": '{"key": "value"',  # Malformed JSON
-        "expected_status": 403,
-    },
-    {
-        "name": "Unusual Content-Type",
-        "method": "POST",
-        "url": BASE_URL,
-        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com", "Content-Type": "application/xml"},
-        "data": "<key>value</key>",  # XML instead of JSON
-        "expected_status": 403,
-    },
-    {
-        "name": "Missing User-Agent",
-        "method": "GET",
-        "url": BASE_URL,
-        "headers": {"Referer": "https://example.com"},  # No User-Agent
-        "expected_status": 403,
-    },
-    {
-        "name": "Missing Referrer",
-        "method": "GET",
-        "url": BASE_URL,
-        "headers": {"User-Agent": "Chrome"},  # No Referer
-        "expected_status": 200,  # or 403 if missing Referer is considered suspicious
-    },
-    {
-        "name": "Unusual Path",
-        "method": "GET",
-        "url": f"{BASE_URL}/admin",  # Unusual path
-        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com"},
-        "expected_status": 403,
-    },
-    {
-        "name": "Unusual Query Parameter",
-        "method": "GET",
-        "url": BASE_URL,
-        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com"},
-        "params": {"debug": "true"},  # Unusual query parameter
-        "expected_status": 403,
-    },
-    {
-        "name": "High Request Rate",
-        "method": "GET",
-        "url": BASE_URL,
-        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com"},
-        "params": {"param1": "value1"},
-        "expected_status": 403,  # If rate limiting is enabled
-    },
-    {
-        "name": "Mixed Case Headers",
-        "method": "GET",
-        "url": BASE_URL,
-        "headers": {"user-agent": "Chrome", "referer": "https://example.com"},  # Mixed case headers
-        "expected_status": 200,  # or 403 if mixed case headers are considered suspicious
-    },
-    # New test cases for /api path
-    {
-        "name": "Normal GET request to /api",
-        "method": "GET",
-        "url": f"{BASE_URL}/api",
-        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com"},
-        "params": {"param1": "value1"},
-        "expected_status": 200,
-    },
-    {
-        "name": "Large request size to /api (blocked)",
-        "method": "POST",
-        "url": f"{BASE_URL}/api",
-        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com"},
-        "data": "a" * 3000,  # Exceeds normal_request_size_range
-        "expected_status": 403,
-    },
-    {
-        "name": "Unusual HTTP method to /api (blocked)",
-        "method": "PUT",  # Not in normal_http_methods
-        "url": f"{BASE_URL}/api",
-        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com"},
-        "expected_status": 403,
-    },
-    {
-        "name": "Unusual User-Agent to /api (blocked)",
-        "method": "GET",
-        "url": f"{BASE_URL}/api",
-        "headers": {"User-Agent": "BadBot", "Referer": "https://example.com"},
-        "expected_status": 403,
-    },
-    {
-        "name": "Unusual Referrer to /api (blocked)",
-        "method": "GET",
-        "url": f"{BASE_URL}/api",
-        "headers": {"User-Agent": "Chrome", "Referer": "https://malicious.com"},
-        "expected_status": 403,
-    },
-    {
-        "name": "Too many query parameters to /api (blocked)",
-        "method": "GET",
-        "url": f"{BASE_URL}/api",
-        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com"},
-        "params": {f"param{i}": "value" for i in range(10)},  # Exceeds normal_query_param_count_range
-        "expected_status": 403,
-    },
-]
+    for level in range(1, 11):  # Severity levels 1 to 10
+        # Distribute leftover tests evenly across levels
+        additional_test = 1 if level <= extra_tests else 0
+        for _ in range(tests_per_level + additional_test):
+            method, payload, headers, data, expected_status, is_malicious = generate_payload(level)
+            test_cases.append({
+                "level": level,
+                "method": method,
+                "payload": payload,
+                "headers": headers,
+                "data": data,
+                "expected_status": expected_status,
+                "is_malicious": is_malicious,
+            })
+    return test_cases
 
-# Run test cases
-results = []
-for test in test_cases:
-    print(f"{Fore.CYAN}Running test: {test['name']}{Style.RESET_ALL}")
-    try:
-        response = requests.request(
-            method=test["method"],
-            url=test["url"],
-            headers=test.get("headers", {}),
-            params=test.get("params", {}),
-            data=test.get("data", None),
-        )
-        status_code = response.status_code
-        is_suspicious = "X-Suspicious-Traffic" in response.headers
+# Generate payload based on severity level
+def generate_payload(level):
+    # Legit requests for levels 1-2
+    if level <= 2:
+        return "GET", "/home", {}, None, 200, False
+    # Suspicious headers and payloads for levels 3-4
+    elif level <= 4:
+        headers = {"X-Suspicious": "<script>alert('test')</script>", "User-Agent": "badbot/1.0"}
+        return "GET", "/search", headers, None, 403, True
+    # SQL Injection for levels 5-6
+    elif level <= 6:
+        payloads = ["/search?q=' OR 1=1 --", "/search?q=test' UNION SELECT NULL, NULL --"]
+        return "POST", payloads[level % 2], {}, None, 403, True
+    # XSS and file inclusion for levels 7-8
+    elif level <= 8:
+        payloads = ["/home?<script>alert(1)</script>", "/download?file=../../etc/passwd"]
+        headers = {"Referer": "http://malicious-site.com"}
+        return "POST", payloads[level % 2], headers, {"data": "test"}, 403, True
+    # Time-based SQLi and tampered cookies for levels 9-10
+    else:
+        payloads = ["/search?q=test' AND SLEEP(5) --", "/home"]
+        headers = {"Cookie": "session=invalid_token", "X-Forwarded-For": "1.2.3.4"}
+        return "PUT", payloads[level % 2], headers, None, 403, True
 
-        # Check if the result matches the expected status
-        if status_code == test["expected_status"]:
-            result = f"{Fore.GREEN}PASS{Style.RESET_ALL}"
-        else:
-            result = f"{Fore.RED}FAIL{Style.RESET_ALL}"
+# Execute test cases
+def execute_tests(host, test_cases):
+    results = []
+    for test in test_cases:
+        try:
+            response = requests.request(
+                method=test["method"],
+                url=f"{host}{test['payload']}",
+                headers=test["headers"],
+                data=test["data"],
+                timeout=5,
+            )
+            actual_status = response.status_code
+            is_correct = (actual_status == test["expected_status"])
+            results.append({
+                "level": test["level"],
+                "method": test["method"],
+                "payload": test["payload"],
+                "expected_status": test["expected_status"],
+                "actual_status": actual_status,
+                "is_correct": is_correct,
+                "is_malicious": test["is_malicious"],
+            })
+        except Exception as e:
+            results.append({
+                "level": test["level"],
+                "method": test["method"],
+                "payload": test["payload"],
+                "expected_status": test["expected_status"],
+                "actual_status": f"Error: {str(e)}",
+                "is_correct": False,
+                "is_malicious": test["is_malicious"],
+            })
+    return results
 
-        # Append result to the results list
-        results.append((test["name"], result, status_code, is_suspicious))
+# Display results with colors and metrics
+def display_results(results):
+    confusion_matrix = Counter({"TP": 0, "FP": 0, "TN": 0, "FN": 0})
 
-        # Print detailed output
-        print(f"Status Code: {status_code}")
-        print(f"Response: {response.text}")
-        if is_suspicious:
-            print(f"{Fore.YELLOW}Traffic marked as suspicious!{Style.RESET_ALL}")
-    except requests.exceptions.RequestException as e:
-        result = f"{Fore.RED}FAIL{Style.RESET_ALL}"
-        results.append((test["name"], result, "Request failed", False))
-        print(f"{Fore.RED}Request failed: {e}{Style.RESET_ALL}")
-    print("-" * 40)
+    for result in results:
+        level = result["level"]
+        payload = result["payload"]
+        expected = result["expected_status"]
+        actual = result["actual_status"]
+        is_correct = result["is_correct"]
+        is_malicious = result["is_malicious"]
 
-# Print summary
-print(f"{Fore.CYAN}\nTest Summary:{Style.RESET_ALL}")
-for name, result, status_code, is_suspicious in results:
-    print(f"{name}: {result} (Status: {status_code}, Suspicious: {is_suspicious})")
+        # Update confusion matrix
+        if is_malicious and is_correct:
+            confusion_matrix["TP"] += 1
+        elif not is_malicious and not is_correct:
+            confusion_matrix["FP"] += 1
+        elif not is_malicious and is_correct:
+            confusion_matrix["TN"] += 1
+        elif is_malicious and not is_correct:
+            confusion_matrix["FN"] += 1
 
-# Count passes and fails
-pass_count = sum(1 for _, result, _, _ in results if "PASS" in result)
-fail_count = len(results) - pass_count
+        # Color-coded output
+        color = "green" if is_correct else "red"
+        print(colored(
+            f"Level {level} | {result['method']} {payload} -> Expected: {expected}, Actual: {actual} (Correct: {is_correct})",
+            color,
+        ))
 
-# Print final result
-if fail_count == 0:
-    print(f"\n{Fore.GREEN}All tests passed!{Style.RESET_ALL}")
-else:
-    print(f"\n{Fore.RED}{fail_count} tests failed.{Style.RESET_ALL}")
+    # Calculate metrics
+    tp, fp, tn, fn = confusion_matrix["TP"], confusion_matrix["FP"], confusion_matrix["TN"], confusion_matrix["FN"]
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+    f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+    accuracy = (tp + tn) / (tp + fp + tn + fn) if (tp + fp + tn + fn) > 0 else 0
+
+    # Display final metrics
+    print("\nFinal Statistics:")
+    print(f"  Total Tests: {len(results)}")
+    print(f"  Accuracy: {accuracy * 100:.2f}%")
+    print(f"  Precision: {precision * 100:.2f}%")
+    print(f"  Recall: {recall * 100:.2f}%")
+    print(f"  F1 Score: {f1_score * 100:.2f}%")
+    print("\nConfusion Matrix:")
+    print(f"  True Positives (TP): {tp}")
+    print(f"  False Positives (FP): {fp}")
+    print(f"  True Negatives (TN): {tn}")
+    print(f"  False Negatives (FN): {fn}")
+
+# Main execution
+if __name__ == "__main__":
+    args = parse_args()
+    test_cases = generate_test_cases(args.num_tests)
+    results = execute_tests(args.host, test_cases)
+    display_results(results)
