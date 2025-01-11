@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -142,16 +143,60 @@ func (m *MLWAF) Validate() error {
 	return nil
 }
 
+// Helper function to sanitize headers
+func sanitizeHeaders(headers http.Header) http.Header {
+	sanitized := make(http.Header)
+	for key, values := range headers {
+		sanitized[key] = values
+	}
+
+	// Redact sensitive headers
+	sensitiveHeaders := []string{"Authorization", "Cookie", "Set-Cookie"}
+	for _, h := range sensitiveHeaders {
+		if sanitized.Get(h) != "" {
+			sanitized.Set(h, "REDACTED")
+		}
+	}
+	return sanitized
+}
+
+// Helper function to sanitize query parameters
+func sanitizeQueryParams(queryParams url.Values) url.Values {
+	sanitized := make(url.Values)
+	for key, values := range queryParams {
+		sanitized[key] = values
+	}
+
+	// Redact sensitive query parameters
+	sensitiveParams := []string{"token", "password", "api_key"}
+	for _, p := range sensitiveParams {
+		if sanitized.Get(p) != "" {
+			sanitized.Set(p, "REDACTED")
+		}
+	}
+	return sanitized
+}
+
 func (m *MLWAF) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
 	startTime := time.Now()
 	clientIP := r.RemoteAddr
+
+	// Handle negative request size
 	requestSize := r.ContentLength
+	if requestSize < 0 {
+		requestSize = 0
+	}
+
 	headerCount := len(r.Header)
 	queryParamCount := len(r.URL.Query())
 	pathSegmentCount := len(strings.Split(strings.Trim(r.URL.Path, "/"), "/"))
 	httpMethod := r.Method
 	userAgent := r.Header.Get("User-Agent")
 	referrer := r.Header.Get("Referer")
+
+	// Sanitize sensitive data before logging
+	sanitizedHeaders := sanitizeHeaders(r.Header)
+	sanitizedQueryParams := sanitizeQueryParams(r.URL.Query())
 
 	// Log detailed request information
 	m.logger.Debug("incoming request",
@@ -164,15 +209,16 @@ func (m *MLWAF) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp
 		zap.Int("path_segment_count", pathSegmentCount),
 		zap.String("user_agent", userAgent),
 		zap.String("referrer", referrer),
-		zap.Any("headers", r.Header),           // Optional: Log headers for debugging
-		zap.Any("query_params", r.URL.Query()), // Optional: Log query parameters for debugging
+		zap.Any("headers", sanitizedHeaders),          // Log sanitized headers
+		zap.Any("query_params", sanitizedQueryParams), // Log sanitized query parameters
 	)
 
+	// Fix race condition: Protect access to requestHistory
 	m.historyMutex.Lock()
 	history := m.requestHistory[clientIP]
 	m.historyMutex.Unlock()
 
-	// Pass the new arguments (httpMethod, userAgent, referrer) to calculateAnomalyScore
+	// Calculate anomaly score
 	anomalyScore := m.calculateAnomalyScore(requestSize, headerCount, queryParamCount, pathSegmentCount, history, httpMethod, userAgent, referrer)
 
 	// Log anomaly score calculation details
@@ -260,18 +306,6 @@ type responseWriterWrapper struct {
 func (rw *responseWriterWrapper) WriteHeader(statusCode int) {
 	rw.statusCode = statusCode
 	rw.ResponseWriter.WriteHeader(statusCode)
-}
-
-func normalize(value float64, min float64, max float64) float64 {
-	if min == max {
-		return 0.0 // No range, so no deviation
-	}
-	if value < min {
-		return (min - value) / (min + 1) // Add 1 to avoid division by zero
-	} else if value > max {
-		return math.Log((value-max)/(max+1) + 1) // Logarithmic scaling for large values
-	}
-	return 0.0 // Within normal range
 }
 
 func (m *MLWAF) calculateAnomalyScore(requestSize int64, headerCount int, queryParamCount int, pathSegmentCount int, history []requestRecord, httpMethod string, userAgent string, referrer string) float64 {
