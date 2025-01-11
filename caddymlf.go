@@ -50,7 +50,7 @@ type MLWAF struct {
 	PerPathConfig             map[string]PathConfig `json:"per_path_config,omitempty"`
 
 	requestHistory map[string][]requestRecord
-	historyMutex   sync.Mutex
+	historyMutex   sync.RWMutex // Changed to sync.RWMutex
 	logger         *zap.Logger
 }
 
@@ -73,66 +73,86 @@ func (MLWAF) CaddyModule() caddy.ModuleInfo {
 	}
 }
 
-// Provision sets up the middleware.
+// responseWriterWrapper is a custom ResponseWriter to capture the status code.
+type responseWriterWrapper struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriterWrapper) WriteHeader(statusCode int) {
+	rw.statusCode = statusCode
+	rw.ResponseWriter.WriteHeader(statusCode)
+}
+
 func (m *MLWAF) Provision(ctx caddy.Context) error {
 	m.logger = ctx.Logger(m)
 	m.logger.Info("ML WAF middleware provisioned")
+	m.logger.Info("using default configurations",
+		zap.Float64("anomaly_threshold", m.AnomalyThreshold),
+		zap.Float64("blocking_threshold", m.BlockingThreshold),
+		zap.Int("normal_request_size_min", m.NormalRequestSizeRangeMin),
+		zap.Int("normal_request_size_max", m.NormalRequestSizeRangeMax),
+		zap.Int("normal_header_count_min", m.NormalHeaderCountMin),
+		zap.Int("normal_header_count_max", m.NormalHeaderCountMax),
+		zap.Int("normal_query_param_count_min", m.NormalQueryParamCountMin),
+		zap.Int("normal_query_param_count_max", m.NormalQueryParamCountMax),
+		zap.Int("normal_path_segment_count_min", m.NormalPathSegmentCountMin),
+		zap.Int("normal_path_segment_count_max", m.NormalPathSegmentCountMax),
+		zap.Float64("request_size_weight", m.RequestSizeWeight),
+		zap.Float64("header_count_weight", m.HeaderCountWeight),
+		zap.Float64("query_param_count_weight", m.QueryParamCountWeight),
+		zap.Float64("path_segment_count_weight", m.PathSegmentCountWeight),
+		zap.Float64("request_frequency_weight", m.RequestFrequencyWeight),
+		zap.Duration("history_window", m.HistoryWindow),
+		zap.Int("max_history_entries", m.MaxHistoryEntries),
+	)
 	m.requestHistory = make(map[string][]requestRecord)
 	return nil
 }
 
 func (m *MLWAF) Validate() error {
-	// Validate thresholds
 	if m.AnomalyThreshold >= m.BlockingThreshold {
 		return fmt.Errorf("anomaly_threshold should be less than blocking_threshold")
 	}
 
-	// Validate weights
-	if m.RequestSizeWeight < 0 {
-		return fmt.Errorf("request_size_weight cannot be negative")
+	if err := m.validateWeight(m.RequestSizeWeight, "request_size_weight"); err != nil {
+		return err
 	}
-	if m.HeaderCountWeight < 0 {
-		return fmt.Errorf("header_count_weight cannot be negative")
+	if err := m.validateWeight(m.HeaderCountWeight, "header_count_weight"); err != nil {
+		return err
 	}
-	if m.QueryParamCountWeight < 0 {
-		return fmt.Errorf("query_param_count_weight cannot be negative")
+	if err := m.validateWeight(m.QueryParamCountWeight, "query_param_count_weight"); err != nil {
+		return err
 	}
-	if m.PathSegmentCountWeight < 0 {
-		return fmt.Errorf("path_segment_count_weight cannot be negative")
+	if err := m.validateWeight(m.PathSegmentCountWeight, "path_segment_count_weight"); err != nil {
+		return err
 	}
-	if m.RequestFrequencyWeight < 0 {
-		return fmt.Errorf("request_frequency_weight cannot be negative")
+	if err := m.validateWeight(m.RequestFrequencyWeight, "request_frequency_weight"); err != nil {
+		return err
 	}
-
-	// Validate ranges
-	if m.NormalRequestSizeRangeMin > 0 && m.NormalRequestSizeRangeMax > 0 && m.NormalRequestSizeRangeMin >= m.NormalRequestSizeRangeMax {
-		return fmt.Errorf("normal_request_size_min should be less than normal_request_size_max")
+	if err := m.validateWeight(m.HTTPMethodWeight, "http_method_weight"); err != nil {
+		return err
 	}
-	if m.NormalHeaderCountMin > 0 && m.NormalHeaderCountMax > 0 && m.NormalHeaderCountMin >= m.NormalHeaderCountMax {
-		return fmt.Errorf("normal_header_count_min should be less than normal_header_count_max")
+	if err := m.validateWeight(m.UserAgentWeight, "user_agent_weight"); err != nil {
+		return err
 	}
-	if m.NormalQueryParamCountMin > 0 && m.NormalQueryParamCountMax > 0 && m.NormalQueryParamCountMin >= m.NormalQueryParamCountMax {
-		return fmt.Errorf("normal_query_param_count_min should be less than normal_query_param_count_max")
-	}
-	if m.NormalPathSegmentCountMin > 0 && m.NormalPathSegmentCountMax > 0 && m.NormalPathSegmentCountMin >= m.NormalPathSegmentCountMax {
-		return fmt.Errorf("normal_path_segment_count_min should be less than normal_path_segment_count_max")
+	if err := m.validateWeight(m.ReferrerWeight, "referrer_weight"); err != nil {
+		return err
 	}
 
-	// Ensure ranges are valid (min and max must both be positive)
-	if m.NormalRequestSizeRangeMin < 0 || m.NormalRequestSizeRangeMax < 0 {
-		return fmt.Errorf("normal_request_size_range values must be positive")
+	if err := m.validateRange(m.NormalRequestSizeRangeMin, m.NormalRequestSizeRangeMax, "normal_request_size"); err != nil {
+		return err
 	}
-	if m.NormalHeaderCountMin < 0 || m.NormalHeaderCountMax < 0 {
-		return fmt.Errorf("normal_header_count_range values must be positive")
+	if err := m.validateRange(m.NormalHeaderCountMin, m.NormalHeaderCountMax, "normal_header_count"); err != nil {
+		return err
 	}
-	if m.NormalQueryParamCountMin < 0 || m.NormalQueryParamCountMax < 0 {
-		return fmt.Errorf("normal_query_param_count_range values must be positive")
+	if err := m.validateRange(m.NormalQueryParamCountMin, m.NormalQueryParamCountMax, "normal_query_param_count"); err != nil {
+		return err
 	}
-	if m.NormalPathSegmentCountMin < 0 || m.NormalPathSegmentCountMax < 0 {
-		return fmt.Errorf("normal_path_segment_count_range values must be positive")
+	if err := m.validateRange(m.NormalPathSegmentCountMin, m.NormalPathSegmentCountMax, "normal_path_segment_count"); err != nil {
+		return err
 	}
 
-	// Validate history configuration
 	if m.HistoryWindow <= 0 {
 		return fmt.Errorf("history_window must be a positive duration")
 	}
@@ -140,18 +160,6 @@ func (m *MLWAF) Validate() error {
 		return fmt.Errorf("max_history_entries must be a positive integer")
 	}
 
-	// Validate weights for new attributes
-	if m.HTTPMethodWeight < 0 {
-		return fmt.Errorf("http_method_weight cannot be negative")
-	}
-	if m.UserAgentWeight < 0 {
-		return fmt.Errorf("user_agent_weight cannot be negative")
-	}
-	if m.ReferrerWeight < 0 {
-		return fmt.Errorf("referrer_weight cannot be negative")
-	}
-
-	// Validate per-path configurations
 	for path, config := range m.PerPathConfig {
 		if config.AnomalyThreshold >= config.BlockingThreshold {
 			return fmt.Errorf("per-path anomaly_threshold should be less than blocking_threshold for path: %s", path)
@@ -161,14 +169,29 @@ func (m *MLWAF) Validate() error {
 	return nil
 }
 
-// Helper function to sanitize headers
-func sanitizeHeaders(headers http.Header) http.Header {
-	sanitized := make(http.Header)
+func (m *MLWAF) validateWeight(weight float64, name string) error {
+	if weight < 0 {
+		return fmt.Errorf("%s cannot be negative", name)
+	}
+	return nil
+}
+
+func (m *MLWAF) validateRange(min int, max int, name string) error {
+	if min > 0 && max > 0 && min >= max {
+		return fmt.Errorf("%s_min should be less than %s_max", name, name)
+	}
+	if min < 0 || max < 0 {
+		return fmt.Errorf("%s_range values must be positive", name)
+	}
+	return nil
+}
+
+func (m *MLWAF) sanitizeHeaders(headers http.Header) http.Header {
+	sanitized := make(http.Header) // Create a new copy
 	for key, values := range headers {
 		sanitized[key] = values
 	}
 
-	// Redact sensitive headers
 	sensitiveHeaders := []string{"Authorization", "Cookie", "Set-Cookie"}
 	for _, h := range sensitiveHeaders {
 		if sanitized.Get(h) != "" {
@@ -178,18 +201,19 @@ func sanitizeHeaders(headers http.Header) http.Header {
 	return sanitized
 }
 
-// Helper function to sanitize query parameters
-func sanitizeQueryParams(queryParams url.Values) url.Values {
+func (m *MLWAF) sanitizeQueryParams(queryParams url.Values) url.Values {
 	sanitized := make(url.Values)
 	for key, values := range queryParams {
 		sanitized[key] = values
 	}
-
-	// Redact sensitive query parameters
-	sensitiveParams := []string{"token", "password", "api_key"}
-	for _, p := range sensitiveParams {
-		if sanitized.Get(p) != "" {
-			sanitized.Set(p, "REDACTED")
+	sensitiveParams := map[string]bool{
+		"token":    true,
+		"password": true,
+		"api_key":  true,
+	}
+	for key := range queryParams {
+		if sensitiveParams[key] {
+			sanitized.Set(key, "REDACTED")
 		}
 	}
 	return sanitized
@@ -199,7 +223,6 @@ func (m *MLWAF) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp
 	startTime := time.Now()
 	clientIP := r.RemoteAddr
 
-	// Handle negative request size
 	requestSize := r.ContentLength
 	if requestSize < 0 {
 		requestSize = 0
@@ -212,11 +235,9 @@ func (m *MLWAF) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp
 	userAgent := r.Header.Get("User-Agent")
 	referrer := r.Header.Get("Referer")
 
-	// Sanitize sensitive data before logging
-	sanitizedHeaders := sanitizeHeaders(r.Header)
-	sanitizedQueryParams := sanitizeQueryParams(r.URL.Query())
+	sanitizedHeaders := m.sanitizeHeaders(r.Header)
+	sanitizedQueryParams := m.sanitizeQueryParams(r.URL.Query())
 
-	// Log detailed request information
 	m.logger.Debug("incoming request",
 		zap.String("client_ip", clientIP),
 		zap.String("method", httpMethod),
@@ -230,76 +251,24 @@ func (m *MLWAF) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp
 		zap.Any("headers", sanitizedHeaders),
 		zap.Any("query_params", sanitizedQueryParams),
 	)
-
-	// Fix race condition: Protect access to requestHistory
-	m.historyMutex.Lock()
+	m.historyMutex.RLock()
 	history := m.requestHistory[clientIP]
-	m.historyMutex.Unlock()
+	m.historyMutex.RUnlock()
 
-	// Calculate anomaly score
 	anomalyScore := m.calculateAnomalyScore(requestSize, headerCount, queryParamCount, pathSegmentCount, history, httpMethod, userAgent, referrer)
 
-	// Log anomaly score and thresholds
 	m.logger.Debug("calculated anomaly score",
 		zap.String("client_ip", clientIP),
 		zap.Float64("anomaly_score", anomalyScore),
 		zap.String("path", r.URL.Path),
 	)
 
-	// Get per-path thresholds if configured
 	pathConfig, ok := m.PerPathConfig[r.URL.Path]
 	if ok {
-		m.logger.Debug("using per-path thresholds",
-			zap.String("path", r.URL.Path),
-			zap.Float64("anomaly_threshold", pathConfig.AnomalyThreshold),
-			zap.Float64("blocking_threshold", pathConfig.BlockingThreshold),
-		)
-		if anomalyScore >= pathConfig.BlockingThreshold {
-			m.logger.Warn("blocking request due to high anomaly score",
-				zap.String("client_ip", clientIP),
-				zap.Float64("anomaly_score", anomalyScore),
-				zap.String("path", r.URL.Path),
-			)
-			w.WriteHeader(http.StatusForbidden)
-			m.updateRequestHistory(clientIP, anomalyScore)
-			return nil
-		}
-
-		if anomalyScore >= pathConfig.AnomalyThreshold {
-			w.Header().Set("X-Suspicious-Traffic", "true")
-			m.logger.Warn("marking traffic as suspicious",
-				zap.String("client_ip", clientIP),
-				zap.Float64("anomaly_score", anomalyScore),
-				zap.String("path", r.URL.Path),
-			)
-		}
+		m.handlePerPathRequest(w, clientIP, r, anomalyScore, pathConfig)
 	} else {
-		m.logger.Debug("using global thresholds",
-			zap.Float64("anomaly_threshold", m.AnomalyThreshold),
-			zap.Float64("blocking_threshold", m.BlockingThreshold),
-		)
-		if anomalyScore >= m.BlockingThreshold {
-			m.logger.Warn("blocking request due to high anomaly score",
-				zap.String("client_ip", clientIP),
-				zap.Float64("anomaly_score", anomalyScore),
-				zap.String("path", r.URL.Path),
-			)
-			w.WriteHeader(http.StatusForbidden)
-			m.updateRequestHistory(clientIP, anomalyScore)
-			return nil
-		}
-
-		if anomalyScore >= m.AnomalyThreshold {
-			w.Header().Set("X-Suspicious-Traffic", "true")
-			m.logger.Warn("marking traffic as suspicious",
-				zap.String("client_ip", clientIP),
-				zap.Float64("anomaly_score", anomalyScore),
-				zap.String("path", r.URL.Path),
-			)
-		}
+		m.handleGlobalRequest(w, clientIP, r, anomalyScore)
 	}
-
-	// Create a response writer wrapper to capture the status code
 	rw := &responseWriterWrapper{ResponseWriter: w, statusCode: http.StatusOK}
 	err := next.ServeHTTP(rw, r)
 	statusCode := rw.statusCode
@@ -316,7 +285,57 @@ func (m *MLWAF) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp
 	return err
 }
 
-// updateRequestHistory adds the current request to the history and prunes old entries.
+func (m *MLWAF) handlePerPathRequest(w http.ResponseWriter, clientIP string, r *http.Request, anomalyScore float64, pathConfig PathConfig) {
+	m.logger.Debug("using per-path thresholds",
+		zap.String("path", r.URL.Path),
+		zap.Float64("anomaly_threshold", pathConfig.AnomalyThreshold),
+		zap.Float64("blocking_threshold", pathConfig.BlockingThreshold),
+	)
+	if anomalyScore >= pathConfig.BlockingThreshold {
+		m.logger.Warn("blocking request due to high anomaly score",
+			zap.String("client_ip", clientIP),
+			zap.Float64("anomaly_score", anomalyScore),
+			zap.String("path", r.URL.Path),
+		)
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+
+	if anomalyScore >= pathConfig.AnomalyThreshold {
+		w.Header().Set("X-Suspicious-Traffic", "true")
+		m.logger.Warn("marking traffic as suspicious",
+			zap.String("client_ip", clientIP),
+			zap.Float64("anomaly_score", anomalyScore),
+			zap.String("path", r.URL.Path),
+		)
+	}
+}
+func (m *MLWAF) handleGlobalRequest(w http.ResponseWriter, clientIP string, r *http.Request, anomalyScore float64) {
+	m.logger.Debug("using global thresholds",
+		zap.Float64("anomaly_threshold", m.AnomalyThreshold),
+		zap.Float64("blocking_threshold", m.BlockingThreshold),
+	)
+
+	if anomalyScore >= m.BlockingThreshold {
+		m.logger.Warn("blocking request due to high anomaly score",
+			zap.String("client_ip", clientIP),
+			zap.Float64("anomaly_score", anomalyScore),
+			zap.String("path", r.URL.Path),
+		)
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+
+	if anomalyScore >= m.AnomalyThreshold {
+		w.Header().Set("X-Suspicious-Traffic", "true")
+		m.logger.Warn("marking traffic as suspicious",
+			zap.String("client_ip", clientIP),
+			zap.Float64("anomaly_score", anomalyScore),
+			zap.String("path", r.URL.Path),
+		)
+	}
+}
+
 func (m *MLWAF) updateRequestHistory(clientIP string, anomalyScore float64) {
 	m.historyMutex.Lock()
 	defer m.historyMutex.Unlock()
@@ -324,23 +343,9 @@ func (m *MLWAF) updateRequestHistory(clientIP string, anomalyScore float64) {
 	record := requestRecord{Timestamp: time.Now(), AnomalyScore: anomalyScore}
 	history := append(m.requestHistory[clientIP], record)
 
-	// Prune old entries based on time window
-	cutoff := time.Now().Add(-m.HistoryWindow)
-	prunedHistory := make([]requestRecord, 0, len(history))
-	for _, rec := range history {
-		if rec.Timestamp.After(cutoff) {
-			prunedHistory = append(prunedHistory, rec)
-		}
-	}
-
-	// Prune if the number of entries exceeds the maximum
-	if len(prunedHistory) > m.MaxHistoryEntries {
-		prunedHistory = prunedHistory[len(prunedHistory)-m.MaxHistoryEntries:]
-	}
+	prunedHistory := m.pruneRequestHistory(history)
 
 	m.requestHistory[clientIP] = prunedHistory
-
-	// Log request history update
 	m.logger.Debug("updated request history",
 		zap.String("client_ip", clientIP),
 		zap.Float64("anomaly_score", anomalyScore),
@@ -348,90 +353,89 @@ func (m *MLWAF) updateRequestHistory(clientIP string, anomalyScore float64) {
 	)
 }
 
-// responseWriterWrapper is a custom ResponseWriter to capture the status code.
-type responseWriterWrapper struct {
-	http.ResponseWriter
-	statusCode int
+func (m *MLWAF) pruneRequestHistory(history []requestRecord) []requestRecord {
+	cutoff := time.Now().Add(-m.HistoryWindow)
+	prunedHistory := make([]requestRecord, 0, len(history))
+	for _, rec := range history {
+		if rec.Timestamp.After(cutoff) {
+			prunedHistory = append(prunedHistory, rec)
+		}
+	}
+	if len(prunedHistory) > m.MaxHistoryEntries {
+		prunedHistory = prunedHistory[len(prunedHistory)-m.MaxHistoryEntries:]
+	}
+	return prunedHistory
 }
-
-func (rw *responseWriterWrapper) WriteHeader(statusCode int) {
-	rw.statusCode = statusCode
-	rw.ResponseWriter.WriteHeader(statusCode)
-}
-
 func (m *MLWAF) calculateAnomalyScore(requestSize int64, headerCount int, queryParamCount int, pathSegmentCount int, history []requestRecord, httpMethod string, userAgent string, referrer string) float64 {
 	score := 0.0
 
-	// Helper function to normalize
-	normalize := func(value float64, min float64, max float64) float64 {
-		if min == max {
-			return 0.0 // No range, so no deviation
-		}
-		if value < min {
-			return (min - value) / (min + 1) // Add 1 to avoid division by zero
-		} else if value > max {
-			return math.Log((value-max)/(max+1) + 1) // Logarithmic scaling for large values
-		}
-		return 0.0 // Within normal range
-	}
+	score += m.calculateRequestSizeScore(requestSize)
+	score += m.calculateHeaderCountScore(headerCount)
+	score += m.calculateQueryParamCountScore(queryParamCount)
+	score += m.calculatePathSegmentCountScore(pathSegmentCount)
+	score += m.calculateHttpMethodScore(httpMethod)
+	score += m.calculateUserAgentScore(userAgent)
+	score += m.calculateReferrerScore(referrer)
+	score += m.calculateRequestFrequencyScore(history)
+	score += m.calculateCorrelationScore(history)
 
-	// Calculate score for request size
-	if m.RequestSizeWeight > 0 {
-		var normalizedRequestSize float64 = 0.0
-		if m.NormalRequestSizeRangeMin > 0 && m.NormalRequestSizeRangeMax > 0 {
-			normalizedRequestSize = normalize(float64(requestSize), float64(m.NormalRequestSizeRangeMin), float64(m.NormalRequestSizeRangeMax))
-		}
-		score += m.RequestSizeWeight * normalizedRequestSize
-		m.logger.Debug("request size contribution to anomaly score",
-			zap.Float64("normalized_request_size", normalizedRequestSize),
-			zap.Float64("weight", m.RequestSizeWeight),
-			zap.Float64("contribution", m.RequestSizeWeight*normalizedRequestSize),
-		)
-	}
+	m.logger.Debug("total anomaly score calculated",
+		zap.Float64("total_score", score),
+	)
 
-	// Calculate score for header count
-	if m.HeaderCountWeight > 0 {
-		var normalizedHeaderCount float64 = 0.0
-		if m.NormalHeaderCountMin > 0 && m.NormalHeaderCountMax > 0 {
-			normalizedHeaderCount = normalize(float64(headerCount), float64(m.NormalHeaderCountMin), float64(m.NormalHeaderCountMax))
-		}
-		score += m.HeaderCountWeight * normalizedHeaderCount
-		m.logger.Debug("header count contribution to anomaly score",
-			zap.Float64("normalized_header_count", normalizedHeaderCount),
-			zap.Float64("weight", m.HeaderCountWeight),
-			zap.Float64("contribution", m.HeaderCountWeight*normalizedHeaderCount),
-		)
-	}
+	return score
+}
 
-	// Calculate score for query parameter count
-	if m.QueryParamCountWeight > 0 {
-		var normalizedQueryParamCount float64 = 0.0
-		if m.NormalQueryParamCountMin > 0 && m.NormalQueryParamCountMax > 0 {
-			normalizedQueryParamCount = normalize(float64(queryParamCount), float64(m.NormalQueryParamCountMin), float64(m.NormalQueryParamCountMax))
-		}
-		score += m.QueryParamCountWeight * normalizedQueryParamCount
-		m.logger.Debug("query parameter count contribution to anomaly score",
-			zap.Float64("normalized_query_param_count", normalizedQueryParamCount),
-			zap.Float64("weight", m.QueryParamCountWeight),
-			zap.Float64("contribution", m.QueryParamCountWeight*normalizedQueryParamCount),
-		)
-	}
+func (m *MLWAF) calculateRequestSizeScore(requestSize int64) float64 {
+	normalizedRequestSize := m.normalizeValue(float64(requestSize), float64(m.NormalRequestSizeRangeMin), float64(m.NormalRequestSizeRangeMax))
+	score := m.RequestSizeWeight * normalizedRequestSize
 
-	// Calculate score for path segment count
-	if m.PathSegmentCountWeight > 0 {
-		var normalizedPathSegmentCount float64 = 0.0
-		if m.NormalPathSegmentCountMin > 0 && m.NormalPathSegmentCountMax > 0 {
-			normalizedPathSegmentCount = normalize(float64(pathSegmentCount), float64(m.NormalPathSegmentCountMin), float64(m.NormalPathSegmentCountMax))
-		}
-		score += m.PathSegmentCountWeight * normalizedPathSegmentCount
-		m.logger.Debug("path segment count contribution to anomaly score",
-			zap.Float64("normalized_path_segment_count", normalizedPathSegmentCount),
-			zap.Float64("weight", m.PathSegmentCountWeight),
-			zap.Float64("contribution", m.PathSegmentCountWeight*normalizedPathSegmentCount),
-		)
-	}
+	m.logger.Debug("request size contribution to anomaly score",
+		zap.Float64("normalized_request_size", normalizedRequestSize),
+		zap.Float64("weight", m.RequestSizeWeight),
+		zap.Float64("contribution", score),
+	)
+	return score
+}
 
-	// Calculate score for HTTP method
+func (m *MLWAF) calculateHeaderCountScore(headerCount int) float64 {
+	normalizedHeaderCount := m.normalizeValue(float64(headerCount), float64(m.NormalHeaderCountMin), float64(m.NormalHeaderCountMax))
+	score := m.HeaderCountWeight * normalizedHeaderCount
+
+	m.logger.Debug("header count contribution to anomaly score",
+		zap.Float64("normalized_header_count", normalizedHeaderCount),
+		zap.Float64("weight", m.HeaderCountWeight),
+		zap.Float64("contribution", score),
+	)
+	return score
+}
+
+func (m *MLWAF) calculateQueryParamCountScore(queryParamCount int) float64 {
+	normalizedQueryParamCount := m.normalizeValue(float64(queryParamCount), float64(m.NormalQueryParamCountMin), float64(m.NormalQueryParamCountMax))
+	score := m.QueryParamCountWeight * normalizedQueryParamCount
+
+	m.logger.Debug("query parameter count contribution to anomaly score",
+		zap.Float64("normalized_query_param_count", normalizedQueryParamCount),
+		zap.Float64("weight", m.QueryParamCountWeight),
+		zap.Float64("contribution", score),
+	)
+	return score
+}
+
+func (m *MLWAF) calculatePathSegmentCountScore(pathSegmentCount int) float64 {
+	normalizedPathSegmentCount := m.normalizeValue(float64(pathSegmentCount), float64(m.NormalPathSegmentCountMin), float64(m.NormalPathSegmentCountMax))
+	score := m.PathSegmentCountWeight * normalizedPathSegmentCount
+
+	m.logger.Debug("path segment count contribution to anomaly score",
+		zap.Float64("normalized_path_segment_count", normalizedPathSegmentCount),
+		zap.Float64("weight", m.PathSegmentCountWeight),
+		zap.Float64("contribution", score),
+	)
+	return score
+}
+
+func (m *MLWAF) calculateHttpMethodScore(httpMethod string) float64 {
+	score := 0.0
 	if m.HTTPMethodWeight > 0 && len(m.NormalHTTPMethods) > 0 {
 		isNormalMethod := false
 		for _, method := range m.NormalHTTPMethods {
@@ -441,7 +445,7 @@ func (m *MLWAF) calculateAnomalyScore(requestSize int64, headerCount int, queryP
 			}
 		}
 		if !isNormalMethod {
-			score += m.HTTPMethodWeight
+			score = m.HTTPMethodWeight
 			m.logger.Debug("HTTP method contribution to anomaly score",
 				zap.String("http_method", httpMethod),
 				zap.Float64("weight", m.HTTPMethodWeight),
@@ -449,8 +453,10 @@ func (m *MLWAF) calculateAnomalyScore(requestSize int64, headerCount int, queryP
 			)
 		}
 	}
-
-	// Calculate score for User-Agent
+	return score
+}
+func (m *MLWAF) calculateUserAgentScore(userAgent string) float64 {
+	score := 0.0
 	if m.UserAgentWeight > 0 && len(m.NormalUserAgents) > 0 {
 		isNormalUserAgent := false
 		for _, ua := range m.NormalUserAgents {
@@ -460,7 +466,7 @@ func (m *MLWAF) calculateAnomalyScore(requestSize int64, headerCount int, queryP
 			}
 		}
 		if !isNormalUserAgent {
-			score += m.UserAgentWeight
+			score = m.UserAgentWeight
 			m.logger.Debug("User-Agent contribution to anomaly score",
 				zap.String("user_agent", userAgent),
 				zap.Float64("weight", m.UserAgentWeight),
@@ -468,8 +474,11 @@ func (m *MLWAF) calculateAnomalyScore(requestSize int64, headerCount int, queryP
 			)
 		}
 	}
+	return score
+}
 
-	// Calculate score for Referrer
+func (m *MLWAF) calculateReferrerScore(referrer string) float64 {
+	score := 0.0
 	if m.ReferrerWeight > 0 && len(m.NormalReferrers) > 0 {
 		isNormalReferrer := false
 		for _, ref := range m.NormalReferrers {
@@ -479,7 +488,7 @@ func (m *MLWAF) calculateAnomalyScore(requestSize int64, headerCount int, queryP
 			}
 		}
 		if !isNormalReferrer {
-			score += m.ReferrerWeight
+			score = m.ReferrerWeight
 			m.logger.Debug("Referrer contribution to anomaly score",
 				zap.String("referrer", referrer),
 				zap.Float64("weight", m.ReferrerWeight),
@@ -487,26 +496,31 @@ func (m *MLWAF) calculateAnomalyScore(requestSize int64, headerCount int, queryP
 			)
 		}
 	}
+	return score
+}
 
-	// Calculate score for request frequency
+func (m *MLWAF) calculateRequestFrequencyScore(history []requestRecord) float64 {
+	score := 0.0
 	if m.RequestFrequencyWeight > 0 && len(history) > 0 {
 		timeWindow := m.HistoryWindow.Seconds()
 		requestCount := float64(len(history))
 		frequency := requestCount / timeWindow
-		score += m.RequestFrequencyWeight * frequency
+		score = m.RequestFrequencyWeight * frequency
 		m.logger.Debug("request frequency contribution to anomaly score",
 			zap.Float64("frequency", frequency),
 			zap.Float64("weight", m.RequestFrequencyWeight),
 			zap.Float64("contribution", m.RequestFrequencyWeight*frequency),
 		)
 	}
+	return score
+}
 
-	// Apply correlation logic based on request history
+func (m *MLWAF) calculateCorrelationScore(history []requestRecord) float64 {
 	correlationScore := 0.0
 	for _, record := range history {
 		timeDiff := time.Since(record.Timestamp).Seconds()
 		if record.AnomalyScore >= m.AnomalyThreshold {
-			timeWeight := math.Exp(-timeDiff / 60) // decay exponentially over 60 seconds
+			timeWeight := math.Exp(-timeDiff / 60)
 			severityWeight := record.AnomalyScore / m.BlockingThreshold
 
 			correlationScore += 0.15 * timeWeight * severityWeight
@@ -519,14 +533,19 @@ func (m *MLWAF) calculateAnomalyScore(requestSize int64, headerCount int, queryP
 			)
 		}
 	}
-	score += correlationScore
+	return correlationScore
+}
 
-	// Log total anomaly score
-	m.logger.Debug("total anomaly score calculated",
-		zap.Float64("total_score", score),
-	)
-
-	return score
+func (m *MLWAF) normalizeValue(value float64, min float64, max float64) float64 {
+	if min == max {
+		return 0.0
+	}
+	if value < min {
+		return (min - value) / (min + 1)
+	} else if value > max {
+		return math.Log((value-max)/(max+1) + 1)
+	}
+	return 0.0
 }
 
 func (m *MLWAF) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
@@ -770,6 +789,7 @@ func (m *MLWAF) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					m.PerPathConfig = make(map[string]PathConfig)
 				}
 				m.PerPathConfig[path] = config
+
 			default:
 				return d.Errf("unrecognized option: %s", d.Val())
 			}
