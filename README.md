@@ -4,7 +4,7 @@
 
 This Caddy module is a simulated ML-based WAF that analyzes HTTP requests, calculates anomaly scores, and flags or blocks threats. It offers customizable thresholds, dynamic behavior, and adapts to web app needs for flexible, real-time threat detection.
 
-## Features 🚀
+## Features
 
 - **🕵️ Anomaly Detection**: Scans request size, headers, query params, path segments, methods, agents and referrers.  
 - **🔗 Request Correlation**: Tracks client IP request history.  
