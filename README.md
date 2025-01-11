@@ -1,9 +1,9 @@
-# Caddy ML WAF (caddy-mlf)
+# Caddy ADF (caddy-adf)
 
-[![Go](https://github.com/fabriziosalmi/caddy-mlf/actions/workflows/go.yml/badge.svg)](https://github.com/fabriziosalmi/caddy-mlf/actions/workflows/go.yml)
-[![CodeQL](https://github.com/fabriziosalmi/caddy-mlf/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/fabriziosalmi/caddy-mlf/actions/workflows/github-code-scanning/codeql)
+[![Go](https://github.com/fabriziosalmi/caddy-adf/actions/workflows/go.yml/badge.svg)](https://github.com/fabriziosalmi/caddy-adf/actions/workflows/go.yml)
+[![CodeQL](https://github.com/fabriziosalmi/caddy-adf/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/fabriziosalmi/caddy-adf/actions/workflows/github-code-scanning/codeql)
 
-`caddy-mlf` is a Caddy middleware module providing a simulated Machine Learning-based Web Application Firewall (WAF). It analyzes incoming HTTP requests, calculates anomaly scores based on various attributes, and can flag or block suspicious traffic. It's designed for flexible, real-time threat detection and can be customized to fit a wide range of web application needs.
+`caddy-adf` is a Caddy middleware module providing a simulated Machine Learning-based Web Application Firewall (WAF). It analyzes incoming HTTP requests, calculates anomaly scores based on various attributes, and can flag or block suspicious traffic. It's designed for flexible, real-time threat detection and can be customized to fit a wide range of web application needs.
 
 ## Table of Contents
 
@@ -32,19 +32,19 @@
 
 ## 1. Installation
 
-To use `caddy-mlf`, you need to have Caddy v2 installed. Follow these steps to install the module:
+To use `caddy-adf`, you need to have Caddy v2 installed. Follow these steps to install the module:
 
 1.  **Download the module:** You can download the pre-compiled module or build it yourself.
 
-    *   **Pre-compiled (Recommended):** Download the binary from the [releases page](https://github.com/fabriziosalmi/caddy-mlf/releases). Place the binary in the Caddy modules directory (usually `~/.config/caddy/modules` or `/usr/local/lib/caddy/modules/`).
+    *   **Pre-compiled (Recommended):** Download the binary from the [releases page](https://github.com/fabriziosalmi/caddy-adf/releases). Place the binary in the Caddy modules directory (usually `~/.config/caddy/modules` or `/usr/local/lib/caddy/modules/`).
     *   **Build from source:**
         ```bash
-        git clone https://github.com/fabriziosalmi/caddy-mlf
-        cd caddy-mlf
-        xcaddy build --with github.com/fabriziosalmi/caddy-mlf
+        git clone https://github.com/fabriziosalmi/caddy-adf
+        cd caddy-adf
+        xcaddy build --with github.com/fabriziosalmi/caddy-adf
         ```
         Place the resulting binary in the Caddy modules directory (usually `~/.config/caddy/modules` or `/usr/local/lib/caddy/modules/`).
-2.  **Update your Caddyfile**: Configure the `caddy-mlf` directive within your Caddyfile as shown below.
+2.  **Update your Caddyfile**: Configure the `caddy-adf` directive within your Caddyfile as shown below.
 3.  **Start Caddy:** Restart or reload Caddy to apply the changes.
 
 ## 2. Features
@@ -65,7 +65,7 @@ To use `caddy-mlf`, you need to have Caddy v2 installed. Follow these steps to i
 
 ## 3. How it Works
 
-`caddy-mlf` operates by:
+`caddy-adf` operates by:
 
 1.  **Attribute Extraction:** Extracting attributes from each incoming HTTP request, such as the request size, header count, query parameters, path segments, HTTP method, User-Agent, Referrer, and request frequency.
 2.  **Anomaly Score Calculation:** Calculating an anomaly score based on configured weights, comparing request attributes to the defined "normal" ranges and behaviors. The score considers factors like request size, header and parameter counts, path segments, method, agent, referrer and request frequency, using configurable weights.
@@ -301,7 +301,7 @@ ml_waf {
 
 ### Tuning Weights
 
-The `caddy-mlf` module uses weights to determine the contribution of different request attributes to the anomaly score. These weights allow you to customize the module's sensitivity to various aspects of incoming requests. Effective weight tuning is crucial for achieving a balance between security and usability.
+The `caddy-adf` module uses weights to determine the contribution of different request attributes to the anomaly score. These weights allow you to customize the module's sensitivity to various aspects of incoming requests. Effective weight tuning is crucial for achieving a balance between security and usability.
 
 -   **Increase weights** for attributes that are more indicative of malicious activity for your application. For example:
     *   If your application is often targeted by brute-force attacks with large request sizes, increase `request_size_weight`.
@@ -407,7 +407,7 @@ To get the most out of troubleshooting, use the `debug` log level in your Caddyf
 }
 ```
 
-This provides detailed information about each request, the calculated anomaly scores, and any decisions made by `caddy-mlf`.
+This provides detailed information about each request, the calculated anomaly scores, and any decisions made by `caddy-adf`.
 
 ### Common Issues
 
@@ -431,7 +431,7 @@ This provides detailed information about each request, the calculated anomaly sc
 
 ## 9. Contributing
 
-Contributions to `caddy-mlf` are welcome! Please feel free to submit issues, feature requests, or pull requests.
+Contributions to `caddy-adf` are welcome! Please feel free to submit issues, feature requests, or pull requests.
 
 ## 10. License
 
