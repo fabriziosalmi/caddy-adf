@@ -1,6 +1,6 @@
 module github.com/fabriziosalmi/caddy-mlf
 
-go 1.22.3
+go 1.23
 
 require (
     github.com/caddyserver/caddy/v2 v2.9.1
