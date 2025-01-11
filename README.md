@@ -3,20 +3,41 @@
 [![Go](https://github.com/fabriziosalmi/caddy-mlf/actions/workflows/go.yml/badge.svg)](https://github.com/fabriziosalmi/caddy-mlf/actions/workflows/go.yml)
 [![CodeQL](https://github.com/fabriziosalmi/caddy-mlf/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/fabriziosalmi/caddy-mlf/actions/workflows/github-code-scanning/codeql)
 
-`caddy-mlf` is a Caddy middleware module that provides a simulated Machine Learning-based Web Application Firewall (WAF). It analyzes incoming HTTP requests, calculates anomaly scores based on various request attributes, and can flag or block suspicious traffic. It's designed for flexible, real-time threat detection and can be customized to fit various web application needs.
+`caddy-mlf` is a Caddy middleware module providing a simulated Machine Learning-based Web Application Firewall (WAF). It analyzes incoming HTTP requests, calculates anomaly scores based on various attributes, and can flag or block suspicious traffic. It's designed for flexible, real-time threat detection and can be customized to fit a wide range of web application needs.
+
+## Table of Contents
+
+1.  [Features](#features)
+2.  [How it Works](#how-it-works)
+3.  [Caddyfile Configuration](#caddyfile-configuration)
+4.  [Configuration Options](#configuration-options)
+    *   [Global Options](#global-options)
+    *   [Per-Path Configuration](#per-path-configuration-per_path_config)
+5.  [Use Cases and Examples](#use-cases-and-examples)
+    *   [1. Detecting and Blocking Brute Force Attacks](#1-detecting-and-blocking-brute-force-attacks)
+    *   [2. Mitigating DDoS Attacks](#2-mitigating-ddos-attacks)
+    *   [3. Preventing Scanning Activities](#3-preventing-scanning-activities)
+6.  [Advanced Configuration](#advanced-configuration)
+    *   [Tuning Weights](#tuning-weights)
+    *   [Fine-Tuning Thresholds](#fine-tuning-thresholds)
+    *   [Understanding Request History](#understanding-request-history)
+7.  [Troubleshooting](#troubleshooting)
+8.  [Contributing](#contributing)
+9.  [License](#license)
 
 ## Features
 
 -   **🤖 Simulated ML Anomaly Detection**: Analyzes request size, headers, query parameters, path segments, HTTP methods, User-Agents, Referrers, and request frequency to identify anomalous patterns.
 -   **🔗 Request Correlation**: Leverages client IP request history to identify potentially malicious patterns over time, enhancing detection accuracy.
 -   **🚦 Configurable Thresholds**:
-    -   `anomaly_threshold`:  Flags requests with an anomaly score above this value as suspicious.
+    -   `anomaly_threshold`: Flags requests with an anomaly score above this value as suspicious.
     -   `blocking_threshold`: Blocks requests with an anomaly score above this value.
 -   **📁 Per-Path Configurations**: Allows you to define unique anomaly and blocking thresholds for specific paths, offering more granular control.
 -   **⚖️ Customizable Weighting**: Provides fine-grained control over how each attribute contributes to the overall anomaly score.
 -   **⏱️ Dynamic Analysis**: Adapts to changes in traffic and attack patterns based on configurable history window and maximum history entries.
 -   **⚡ Lightweight and Efficient**: Designed to have minimal impact on performance.
--   **🛡️ Protection against common attacks**: Helps protect against brute force, DDoS, scanning and other malicious activities.
+-   **🛡️ Protection against common attacks**: Helps protect against brute force, DDoS, scanning, and other malicious activities.
+-    **🎛️ Redaction:** Automatically redacts sensitive headers and query parameters such as `Authorization`, `Cookie`, `Set-Cookie`, `token`, `password`, `api_key`.
 
 ---
 
@@ -25,16 +46,14 @@
 `caddy-mlf` operates by:
 
 1.  **Attribute Extraction:** Extracting attributes from each incoming HTTP request, such as the request size, header count, query parameters, path segments, HTTP method, User-Agent, Referrer, and request frequency.
-2.  **Anomaly Score Calculation:** Calculating an anomaly score based on configured weights, comparing request attributes to the defined "normal" ranges and behaviors. The score considers factors like request size, header and parameter counts, path segments, method, agent, referrer and request frequency.
-3.  **Request History Tracking:** Maintains a history of requests for each client IP within a configurable time window, enabling detection of suspicious patterns over time and request correlation.
+2.  **Anomaly Score Calculation:** Calculating an anomaly score based on configured weights, comparing request attributes to the defined "normal" ranges and behaviors. The score considers factors like request size, header and parameter counts, path segments, method, agent, referrer and request frequency, using configurable weights.
+3.  **Request History Tracking:** Maintains a history of requests for each client IP within a configurable time window, enabling detection of suspicious patterns over time and request correlation. This history is sharded to optimize performance.
 4.  **Threshold-Based Action:** Taking action based on the calculated anomaly score:
     *   **Blocking:** If the anomaly score meets or exceeds the `blocking_threshold`, the request is blocked with a 403 Forbidden response.
     *   **Marking as Suspicious:** If the anomaly score is above the `anomaly_threshold` but below the `blocking_threshold`, the request is marked as suspicious by adding an `X-Suspicious-Traffic: true` header to the response.
-5.  **Normal Request Processing:** Allowing normal requests to proceed to the next middleware or handler.
+5.  **Normal Request Processing:** Allowing normal requests to proceed to the next middleware or handler in the chain.
 
 ## Caddyfile Configuration
-
-Here's an example Caddyfile configuration for `caddy-mlf`:
 
 ```caddyfile
 {
@@ -103,24 +122,24 @@ Here's an example Caddyfile configuration for `caddy-mlf`:
 -   **`normal_header_count_range`**: `int int`. Defines the normal range for the number of headers in a request `min max`.
 -   **`normal_query_param_count_range`**: `int int`. Defines the normal range for the number of query parameters in a request `min max`.
 -   **`normal_path_segment_count_range`**: `int int`. Defines the normal range for the number of segments in a request path `min max`.
--   **`normal_http_methods`**: `string...`.  A list of HTTP methods considered normal (e.g., `GET`, `POST`).
--   **`normal_user_agents`**: `string...`. A list of User-Agent substrings considered normal.
--   **`normal_referrers`**: `string...`. A list of Referrer substrings considered normal.
--   **`request_size_weight`**: `float` (default: `1.0`). Weight for the request size in anomaly score calculation.
--   **`header_count_weight`**: `float` (default: `1.0`). Weight for the header count in anomaly score calculation.
--   **`query_param_count_weight`**: `float` (default: `1.0`). Weight for the query parameter count in anomaly score calculation.
--   **`path_segment_count_weight`**: `float` (default: `1.0`). Weight for the path segment count in anomaly score calculation.
--    **`http_method_weight`**: `float` (default: `0.0`). Weight to apply if a request's HTTP method is not within the `normal_http_methods` list.
--    **`user_agent_weight`**: `float` (default: `0.0`). Weight to apply if a request's User-Agent does not contain any of the `normal_user_agents` substrings.
--   **`referrer_weight`**: `float` (default: `0.0`). Weight to apply if a request's Referrer does not contain any of the `normal_referrers` substrings.
--   **`request_frequency_weight`**: `float` (default: `1.0`). Weight for the request frequency in anomaly score calculation.
--   **`history_window`**: `duration` (default: `1m`). Duration for which request history is kept.
--    **`max_history_entries`**: `int` (default: `10`). Maximum number of request history entries per client IP to store.
+-   **`normal_http_methods`**: `string...`. A list of HTTP methods considered normal (e.g., `GET`, `POST`). Requests using methods not in this list will be penalized based on `http_method_weight`.
+-   **`normal_user_agents`**: `string...`. A list of User-Agent substrings considered normal. Requests with User-Agents that do not contain any of these substrings will be penalized based on `user_agent_weight`.
+-   **`normal_referrers`**: `string...`. A list of Referrer substrings considered normal. Requests with Referrers that do not contain any of these substrings will be penalized based on `referrer_weight`.
+-   **`request_size_weight`**: `float` (default: `1.0`). Weight for the request size in the anomaly score calculation. Adjust this to prioritize the impact of request size variations.
+-   **`header_count_weight`**: `float` (default: `1.0`). Weight for the header count in the anomaly score calculation. Increase this to emphasize requests with unusual header counts.
+-   **`query_param_count_weight`**: `float` (default: `1.0`). Weight for the query parameter count in the anomaly score calculation. Increase this to emphasize requests with unusual query parameter counts.
+-   **`path_segment_count_weight`**: `float` (default: `1.0`). Weight for the path segment count in the anomaly score calculation.
+-   **`http_method_weight`**: `float` (default: `0.0`). Weight to apply if a request's HTTP method is not within the `normal_http_methods` list. Useful to penalize unusual HTTP methods.
+-   **`user_agent_weight`**: `float` (default: `0.0`). Weight to apply if a request's User-Agent does not contain any of the `normal_user_agents` substrings. Useful to penalize requests with unusual User-Agents.
+-    **`referrer_weight`**: `float` (default: `0.0`). Weight to apply if a request's Referrer does not contain any of the `normal_referrers` substrings. Useful to penalize requests with unusual Referrers.
+-   **`request_frequency_weight`**: `float` (default: `1.0`). Weight for the request frequency in the anomaly score calculation. Increasing this makes the module more sensitive to high request rates from the same client.
+-   **`history_window`**: `duration` (default: `1m`). Duration for which request history is kept. Increase this for longer-term behavior analysis and decreased for shorter-term analysis.
+-   **`max_history_entries`**: `int` (default: `10`). Maximum number of request history entries per client IP to store. Adjust based on the `history_window` and the volume of traffic you expect to process.
 
 ### Per-Path Configuration (`per_path_config`)
 
 -   **`per_path_config <path> { ... }`**: Allows you to set different `anomaly_threshold` and `blocking_threshold` options for a specific path.
-    -   **`anomaly_threshold`**: `float`.  Overrides the global `anomaly_threshold` for this path.
+    -   **`anomaly_threshold`**: `float`. Overrides the global `anomaly_threshold` for this path.
     -   **`blocking_threshold`**: `float`. Overrides the global `blocking_threshold` for this path.
 
 ## Use Cases and Examples
@@ -148,9 +167,10 @@ ml_waf {
 ```
 
 **Explanation:**
-- **`request_frequency_weight 0.3`**:  Emphasizes request frequency to detect rapid login attempts.
-- **`history_window 1m`**: Tracks recent requests for quick detection.
-- **`max_history_entries 50`**:  Limits the history to a reasonable amount.
+
+-   **`request_frequency_weight 0.3`**: Emphasizes request frequency to detect rapid login attempts.
+-   **`history_window 1m`**: Tracks recent requests for quick detection.
+-   **`max_history_entries 50`**: Limits the history to a reasonable amount.
 
 ### 2. Mitigating DDoS Attacks
 
@@ -174,8 +194,9 @@ ml_waf {
 ```
 
 **Explanation:**
--   **`request_frequency_weight 0.15`**:  A moderate weight is assigned for request frequency.
--   **`history_window 10m`**:  Examines traffic over a longer period for distributed attacks.
+
+-   **`request_frequency_weight 0.15`**: A moderate weight is assigned for request frequency.
+-   **`history_window 10m`**: Examines traffic over a longer period for distributed attacks.
 -   **`max_history_entries 100`**: A larger history is kept for identifying larger attacks.
 
 ### 3. Preventing Scanning Activities
@@ -198,9 +219,43 @@ ml_waf {
 ```
 
 **Explanation:**
--   **`request_frequency_weight 0.1`**:  Reduces the focus on frequency, emphasizing other request features.
--   **`history_window 5m`**:  Tracks requests over a moderate window for scanning activity.
+
+-   **`request_frequency_weight 0.1`**: Reduces the focus on frequency, emphasizing other request features.
+-   **`history_window 5m`**: Tracks requests over a moderate window for scanning activity.
 -   **`max_history_entries 50`**: Keeps a reasonable history size.
+
+## Advanced Configuration
+
+### Tuning Weights
+
+The `caddy-mlf` module uses weights to determine the contribution of different request attributes to the anomaly score. Adjust these weights to prioritize certain aspects of your traffic:
+
+-   **Increase weights** for attributes that are more indicative of malicious activity for your application.
+-   **Decrease weights** for attributes that are less relevant to security in your specific scenario.
+-   Make sure the total of weights sums up to a reasonable value for your scoring needs.
+
+### Fine-Tuning Thresholds
+
+-   **Start with conservative thresholds:** Begin with higher `anomaly_threshold` and `blocking_threshold` values to minimize false positives.
+-   **Monitor logs:** Regularly check your Caddy logs for suspicious requests or blocked requests.
+-   **Adjust incrementally:** Fine-tune the thresholds gradually based on the observed behavior.
+-   **Use per-path configurations** to apply tighter rules to more sensitive parts of your application.
+
+### Understanding Request History
+
+The request history mechanism helps to identify patterns of attack and correlate suspicious behavior over time. Here's how to best utilize it:
+
+-   **`history_window`:** Set this value based on your observation window. If your application needs quick reaction times, shorten the window. For slower patterns, keep a longer window.
+-   **`max_history_entries`:** Adjust the number of entries based on traffic volume and your system's memory capabilities.
+-   **Monitor:** Keep an eye on your logs, where information about the history and anomaly score of every request is logged using the debug level.
+
+## Troubleshooting
+
+-   **Enable Debug Logging:** Use Caddy's debug log level for detailed information.
+-   **Check Caddy Logs:** Inspect the logs for errors, suspicious traffic flags, and blocked requests.
+-   **Start Small:** Begin with a basic configuration and add complexity gradually.
+-   **Consult the documentation:** Always double check the documentation.
+-   **Test Carefully:** Test your WAF configuration thoroughly in a staging environment before deploying to production.
 
 ## Contributing
 
