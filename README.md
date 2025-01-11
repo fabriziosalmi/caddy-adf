@@ -1,6 +1,7 @@
 # Caddy ML WAF (caddy-mlf)
 
-[![Go](https://github.com/fabriziosalmi/caddy-mlf/actions/workflows/go.yml/badge.svg)](https://github.com/fabriziosalmi/caddy-mlf/actions/workflows/go.yml)
+[![Go](https://github.com/fabriziosalmi/caddy-mlf/actions/workflows/go.yml/badge.svg)](https://github.com/fabriziosalmi/caddy-mlf/actions/workflows/go.yml) [![CodeQL](https://github.com/fabriziosalmi/caddy-mlf/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/fabriziosalmi/caddy-mlf/actions/workflows/github-code-scanning/codeql)
+
 
 A Caddy module implementing a simulated Machine Learning Web Application Firewall (WAF) with request correlation. This module analyzes incoming HTTP requests based on various characteristics and calculates an anomaly score. Based on configurable thresholds, it can mark requests as suspicious or block them entirely. This module is designed to provide a highly customizable and flexible framework for analyzing web traffic and identifying potential threats in a simulated machine learning environment. By focusing on providing granular control and dynamic behavior, it can adapt to varying web application scenarios and requirements.
 
