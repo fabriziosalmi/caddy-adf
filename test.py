@@ -144,6 +144,52 @@ test_cases = [
         "headers": {"user-agent": "Chrome", "referer": "https://example.com"},  # Mixed case headers
         "expected_status": 200,  # or 403 if mixed case headers are considered suspicious
     },
+    # New test cases for /api path
+    {
+        "name": "Normal GET request to /api",
+        "method": "GET",
+        "url": f"{BASE_URL}/api",
+        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com"},
+        "params": {"param1": "value1"},
+        "expected_status": 200,
+    },
+    {
+        "name": "Large request size to /api (blocked)",
+        "method": "POST",
+        "url": f"{BASE_URL}/api",
+        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com"},
+        "data": "a" * 3000,  # Exceeds normal_request_size_range
+        "expected_status": 403,
+    },
+    {
+        "name": "Unusual HTTP method to /api (blocked)",
+        "method": "PUT",  # Not in normal_http_methods
+        "url": f"{BASE_URL}/api",
+        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com"},
+        "expected_status": 403,
+    },
+    {
+        "name": "Unusual User-Agent to /api (blocked)",
+        "method": "GET",
+        "url": f"{BASE_URL}/api",
+        "headers": {"User-Agent": "BadBot", "Referer": "https://example.com"},
+        "expected_status": 403,
+    },
+    {
+        "name": "Unusual Referrer to /api (blocked)",
+        "method": "GET",
+        "url": f"{BASE_URL}/api",
+        "headers": {"User-Agent": "Chrome", "Referer": "https://malicious.com"},
+        "expected_status": 403,
+    },
+    {
+        "name": "Too many query parameters to /api (blocked)",
+        "method": "GET",
+        "url": f"{BASE_URL}/api",
+        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com"},
+        "params": {f"param{i}": "value" for i in range(10)},  # Exceeds normal_query_param_count_range
+        "expected_status": 403,
+    },
 ]
 
 # Run test cases
