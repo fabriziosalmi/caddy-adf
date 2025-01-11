@@ -1,4 +1,4 @@
-module github.com/fabriziosalmi/caddy-mlf
+module github.com/fabriziosalmi/caddy-adf
 
 go 1.23
 
