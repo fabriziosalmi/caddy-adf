@@ -18,6 +18,14 @@ test_cases = [
         "expected_status": 200,
     },
     {
+        "name": "Normal POST request",
+        "method": "POST",
+        "url": BASE_URL,
+        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com", "Content-Type": "application/json"},
+        "data": '{"key": "value"}',
+        "expected_status": 200,
+    },
+    {
         "name": "Large request size (blocked)",
         "method": "POST",
         "url": BASE_URL,
@@ -67,6 +75,74 @@ test_cases = [
         "url": f"{BASE_URL}/segment1/segment2/segment3/segment4/segment5/segment6",  # Exceeds normal_path_segment_count_range
         "headers": {"User-Agent": "Chrome", "Referer": "https://example.com"},
         "expected_status": 403,
+    },
+    {
+        "name": "Empty request body",
+        "method": "POST",
+        "url": BASE_URL,
+        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com", "Content-Type": "application/json"},
+        "data": "",  # Empty body
+        "expected_status": 200,  # or 403 if empty body is considered suspicious
+    },
+    {
+        "name": "Malformed JSON body",
+        "method": "POST",
+        "url": BASE_URL,
+        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com", "Content-Type": "application/json"},
+        "data": '{"key": "value"',  # Malformed JSON
+        "expected_status": 403,
+    },
+    {
+        "name": "Unusual Content-Type",
+        "method": "POST",
+        "url": BASE_URL,
+        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com", "Content-Type": "application/xml"},
+        "data": "<key>value</key>",  # XML instead of JSON
+        "expected_status": 403,
+    },
+    {
+        "name": "Missing User-Agent",
+        "method": "GET",
+        "url": BASE_URL,
+        "headers": {"Referer": "https://example.com"},  # No User-Agent
+        "expected_status": 403,
+    },
+    {
+        "name": "Missing Referrer",
+        "method": "GET",
+        "url": BASE_URL,
+        "headers": {"User-Agent": "Chrome"},  # No Referer
+        "expected_status": 200,  # or 403 if missing Referer is considered suspicious
+    },
+    {
+        "name": "Unusual Path",
+        "method": "GET",
+        "url": f"{BASE_URL}/admin",  # Unusual path
+        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com"},
+        "expected_status": 403,
+    },
+    {
+        "name": "Unusual Query Parameter",
+        "method": "GET",
+        "url": BASE_URL,
+        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com"},
+        "params": {"debug": "true"},  # Unusual query parameter
+        "expected_status": 403,
+    },
+    {
+        "name": "High Request Rate",
+        "method": "GET",
+        "url": BASE_URL,
+        "headers": {"User-Agent": "Chrome", "Referer": "https://example.com"},
+        "params": {"param1": "value1"},
+        "expected_status": 403,  # If rate limiting is enabled
+    },
+    {
+        "name": "Mixed Case Headers",
+        "method": "GET",
+        "url": BASE_URL,
+        "headers": {"user-agent": "Chrome", "referer": "https://example.com"},  # Mixed case headers
+        "expected_status": 200,  # or 403 if mixed case headers are considered suspicious
     },
 ]
 
