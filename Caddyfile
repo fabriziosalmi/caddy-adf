@@ -1,12 +1,13 @@
 {
     admin off
-    order ml_waf before respond
     log {
         level info
     }
+    order ml_waf before respond
 }
 
 :8082 {
+    
     handle {
         ml_waf {
             # Thresholds
@@ -50,15 +51,15 @@
             per_path_config /api {
                 anomaly_threshold 0.15            # Balanced threshold for APIs
                 blocking_threshold 0.3
-            }   
+            }
             per_path_config /login {
                 anomaly_threshold 0.1             # Stricter for sensitive login paths
                 blocking_threshold 0.25
-            }   
+            }
             per_path_config /home {
                 anomaly_threshold 0.6            # Stricter for sensitive login paths
                 blocking_threshold 2
-            }             
+            }
         }
         respond "Hello, world!" 200
     }
