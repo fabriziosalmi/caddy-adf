@@ -24,7 +24,6 @@ This Caddy module is a simulated ML-based WAF that analyzes HTTP requests, calcu
 
 ### Example Configuration:
 ```caddyfile
-```caddyfile
 {
     admin off
     order ml_waf before respond
