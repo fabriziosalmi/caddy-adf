@@ -47,9 +47,17 @@ type MLWAF struct {
 	UserAgentWeight           float64       `json:"user_agent_weight,omitempty"`   // Weight for User-Agent
 	ReferrerWeight            float64       `json:"referrer_weight,omitempty"`     // Weight for Referrer
 
+	PerPathConfig map[string]PathConfig `json:"per_path_config,omitempty"` // Per-path configurations
+
 	requestHistory map[string][]requestRecord
 	historyMutex   sync.Mutex
 	logger         *zap.Logger
+}
+
+// PathConfig defines per-path configuration for thresholds and rules.
+type PathConfig struct {
+	AnomalyThreshold  float64 `json:"anomaly_threshold,omitempty"`
+	BlockingThreshold float64 `json:"blocking_threshold,omitempty"`
 }
 
 type requestRecord struct {
@@ -140,6 +148,13 @@ func (m *MLWAF) Validate() error {
 		return fmt.Errorf("referrer_weight cannot be negative")
 	}
 
+	// Validate per-path configurations
+	for path, config := range m.PerPathConfig {
+		if config.AnomalyThreshold >= config.BlockingThreshold {
+			return fmt.Errorf("per-path anomaly_threshold should be less than blocking_threshold for path: %s", path)
+		}
+	}
+
 	return nil
 }
 
@@ -221,31 +236,64 @@ func (m *MLWAF) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp
 	// Calculate anomaly score
 	anomalyScore := m.calculateAnomalyScore(requestSize, headerCount, queryParamCount, pathSegmentCount, history, httpMethod, userAgent, referrer)
 
-	// Log anomaly score calculation details
+	// Log anomaly score and thresholds
 	m.logger.Debug("calculated anomaly score",
 		zap.String("client_ip", clientIP),
 		zap.Float64("anomaly_score", anomalyScore),
 		zap.String("path", r.URL.Path),
 	)
 
-	if anomalyScore >= m.BlockingThreshold {
-		m.logger.Warn("blocking request due to high anomaly score",
-			zap.String("client_ip", clientIP),
-			zap.Float64("anomaly_score", anomalyScore),
+	// Get per-path thresholds if configured
+	pathConfig, ok := m.PerPathConfig[r.URL.Path]
+	if ok {
+		m.logger.Debug("using per-path thresholds",
 			zap.String("path", r.URL.Path),
+			zap.Float64("anomaly_threshold", pathConfig.AnomalyThreshold),
+			zap.Float64("blocking_threshold", pathConfig.BlockingThreshold),
 		)
-		w.WriteHeader(http.StatusForbidden)
-		m.updateRequestHistory(clientIP, anomalyScore)
-		return nil
-	}
+		if anomalyScore >= pathConfig.BlockingThreshold {
+			m.logger.Warn("blocking request due to high anomaly score",
+				zap.String("client_ip", clientIP),
+				zap.Float64("anomaly_score", anomalyScore),
+				zap.String("path", r.URL.Path),
+			)
+			w.WriteHeader(http.StatusForbidden)
+			m.updateRequestHistory(clientIP, anomalyScore)
+			return nil
+		}
 
-	if anomalyScore >= m.AnomalyThreshold {
-		w.Header().Set("X-Suspicious-Traffic", "true")
-		m.logger.Warn("marking traffic as suspicious",
-			zap.String("client_ip", clientIP),
-			zap.Float64("anomaly_score", anomalyScore),
-			zap.String("path", r.URL.Path),
+		if anomalyScore >= pathConfig.AnomalyThreshold {
+			w.Header().Set("X-Suspicious-Traffic", "true")
+			m.logger.Warn("marking traffic as suspicious",
+				zap.String("client_ip", clientIP),
+				zap.Float64("anomaly_score", anomalyScore),
+				zap.String("path", r.URL.Path),
+			)
+		}
+	} else {
+		m.logger.Debug("using global thresholds",
+			zap.Float64("anomaly_threshold", m.AnomalyThreshold),
+			zap.Float64("blocking_threshold", m.BlockingThreshold),
 		)
+		if anomalyScore >= m.BlockingThreshold {
+			m.logger.Warn("blocking request due to high anomaly score",
+				zap.String("client_ip", clientIP),
+				zap.Float64("anomaly_score", anomalyScore),
+				zap.String("path", r.URL.Path),
+			)
+			w.WriteHeader(http.StatusForbidden)
+			m.updateRequestHistory(clientIP, anomalyScore)
+			return nil
+		}
+
+		if anomalyScore >= m.AnomalyThreshold {
+			w.Header().Set("X-Suspicious-Traffic", "true")
+			m.logger.Warn("marking traffic as suspicious",
+				zap.String("client_ip", clientIP),
+				zap.Float64("anomaly_score", anomalyScore),
+				zap.String("path", r.URL.Path),
+			)
+		}
 	}
 
 	// Create a response writer wrapper to capture the status code
@@ -465,7 +513,6 @@ func (m *MLWAF) calculateAnomalyScore(requestSize int64, headerCount int, queryP
 	return score
 }
 
-// UnmarshalCaddyfile parses the Caddyfile configuration.
 func (m *MLWAF) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 	for d.Next() {
 		for d.NextBlock(0) {
@@ -664,6 +711,40 @@ func (m *MLWAF) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					return d.Errf("parsing referrer_weight: %v", err)
 				}
 				m.ReferrerWeight = val
+			case "per_path_config":
+				if !d.NextArg() {
+					return d.ArgErr()
+				}
+				path := d.Val()
+				config := PathConfig{}
+				for d.NextBlock(1) {
+					switch d.Val() {
+					case "anomaly_threshold":
+						if !d.NextArg() {
+							return d.ArgErr()
+						}
+						val, err := strconv.ParseFloat(d.Val(), 64)
+						if err != nil {
+							return d.Errf("parsing anomaly_threshold for path %s: %v", path, err)
+						}
+						config.AnomalyThreshold = val
+					case "blocking_threshold":
+						if !d.NextArg() {
+							return d.ArgErr()
+						}
+						val, err := strconv.ParseFloat(d.Val(), 64)
+						if err != nil {
+							return d.Errf("parsing blocking_threshold for path %s: %v", path, err)
+						}
+						config.BlockingThreshold = val
+					default:
+						return d.Errf("unrecognized option for per_path_config: %s", d.Val())
+					}
+				}
+				if m.PerPathConfig == nil {
+					m.PerPathConfig = make(map[string]PathConfig)
+				}
+				m.PerPathConfig[path] = config
 			default:
 				return d.Errf("unrecognized option: %s", d.Val())
 			}
