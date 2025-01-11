@@ -17,10 +17,6 @@ This Caddy module is a simulated ML-based WAF that analyzes HTTP requests, calcu
 
 ---
 
-## New Feature: Request Frequency Weight
-
-The latest version of `caddy-mlf` introduces a **request frequency weight** feature. This allows the module to detect and mitigate bursts of requests from the same client, which are often indicative of brute force attacks, DDoS attempts, or scanning activities.
-
 ### How It Works:
 - The module tracks the number of requests from each client IP within the configured `history_window`.
 - If the frequency of requests exceeds normal behavior, the anomaly score is increased based on the `request_frequency_weight`.
@@ -28,40 +24,61 @@ The latest version of `caddy-mlf` introduces a **request frequency weight** feat
 
 ### Example Configuration:
 ```caddyfile
-ml_waf {
-    anomaly_threshold 0.5
-    blocking_threshold 0.7
+```caddyfile
+{
+    admin off
+    order ml_waf before respond
+    log {
+        level debug
+    }
+}
 
-    # Normal ranges for request attributes
-    normal_request_size_range 50 5000
-    normal_header_count_range 3 25
-    normal_query_param_count_range 0 10
-    normal_path_segment_count_range 1 5
+:8082 {
+    handle {
+        ml_waf {
+            # Thresholds
+            anomaly_threshold 0.5
+            blocking_threshold 0.7
 
-    # Additional attributes
-    normal_http_methods GET POST
-    normal_user_agents fab Mozilla
-    normal_referrers https://example.com
+            # Normal ranges for request attributes
+            normal_request_size_range 50 5000
+            normal_header_count_range 3 25
+            normal_query_param_count_range 0 10
+            normal_path_segment_count_range 1 5
 
-    # Weights (sum = 1)
-    request_size_weight 0.25
-    header_count_weight 0.2
-    query_param_count_weight 0.15
-    http_method_weight 0.1
-    user_agent_weight 0.1
-    referrer_weight 0.05
-    path_segment_count_weight 0.05
-    request_frequency_weight 0.1  # New: Weight for request frequency
+            # Additional attributes
+            normal_http_methods GET POST
+            normal_user_agents fab Mozilla
+            normal_referrers https://example.com
 
-    # Request history settings
-    history_window 5m
-    max_history_entries 10000
+            # Weights (sum = 1)
+            request_size_weight 0.25
+            header_count_weight 0.2
+            query_param_count_weight 0.15
+            http_method_weight 0.1
+            user_agent_weight 0.1
+            referrer_weight 0.05
+            path_segment_count_weight 0.05
+            request_frequency_weight 0.1  # New: Weight for request frequency
+
+            # Request history settings
+            history_window 5m
+            max_history_entries 10000
+
+            # Per-path configuration for /api
+            per_path_config /api {
+                anomaly_threshold 0.2
+                blocking_threshold 0.4
+            }
+        }
+        respond "Hello, world!" 200
+    }
 }
 ```
 
 ---
 
-## Updated Configuration Options
+## Configuration Options
 
 ### `request_frequency_weight`
 * **Description:** Assigns a weight to the frequency of requests from the same client IP. Higher weights increase the impact of request bursts on the anomaly score.
@@ -76,7 +93,7 @@ ml_waf {
 
 ---
 
-## Updated Use Cases
+## Use Cases
 
 ### 1. **Detecting and Blocking Brute Force Attacks**
 Brute force attacks involve a high volume of requests from the same IP address in a short period. The `request_frequency_weight` feature helps detect and block such behavior.
@@ -162,7 +179,7 @@ ml_waf {
 
 ---
 
-## Updated How It Works
+## How It Works
 
 The `caddy-mlf` module now includes the following steps in its operation:
 
@@ -174,63 +191,6 @@ The `caddy-mlf` module now includes the following steps in its operation:
    * If the score is above the `anomaly_threshold` but below the `blocking_threshold`, the request is marked as suspicious by adding a `X-Suspicious-Traffic` header.
 5. **Allows Legitimate Traffic**: Allows non-suspicious requests to proceed to the next middleware or handler in the chain.
 
----
-
-## Updated Example Configuration
-
-Here’s an example configuration that includes the new `request_frequency_weight` feature:
-
-```caddyfile
-{
-    admin off
-    order ml_waf before respond
-    log {
-        level debug
-    }
-}
-
-:8082 {
-    handle {
-        ml_waf {
-            # Thresholds
-            anomaly_threshold 0.5
-            blocking_threshold 0.7
-
-            # Normal ranges for request attributes
-            normal_request_size_range 50 5000
-            normal_header_count_range 3 25
-            normal_query_param_count_range 0 10
-            normal_path_segment_count_range 1 5
-
-            # Additional attributes
-            normal_http_methods GET POST
-            normal_user_agents fab Mozilla
-            normal_referrers https://example.com
-
-            # Weights (sum = 1)
-            request_size_weight 0.25
-            header_count_weight 0.2
-            query_param_count_weight 0.15
-            http_method_weight 0.1
-            user_agent_weight 0.1
-            referrer_weight 0.05
-            path_segment_count_weight 0.05
-            request_frequency_weight 0.1  # New: Weight for request frequency
-
-            # Request history settings
-            history_window 5m
-            max_history_entries 10000
-
-            # Per-path configuration for /api
-            per_path_config /api {
-                anomaly_threshold 0.2
-                blocking_threshold 0.4
-            }
-        }
-        respond "Hello, world!" 200
-    }
-}
-```
 
 ---
 
