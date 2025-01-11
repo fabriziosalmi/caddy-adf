@@ -36,16 +36,15 @@ To use `caddy-mlf`, you need to have Caddy v2 installed. Follow these steps to i
 
 1.  **Download the module:** You can download the pre-compiled module or build it yourself.
 
-    *   **Pre-compiled (Recommended):** Download the binary from the [releases page](https://github.com/fabriziosalmi/caddy-mlf/releases).  Place the binary in the Caddy modules directory (usually `~/.config/caddy/modules` or `/usr/local/lib/caddy/modules/`).
+    *   **Pre-compiled (Recommended):** Download the binary from the [releases page](https://github.com/fabriziosalmi/caddy-mlf/releases). Place the binary in the Caddy modules directory (usually `~/.config/caddy/modules` or `/usr/local/lib/caddy/modules/`).
     *   **Build from source:**
         ```bash
         git clone https://github.com/fabriziosalmi/caddy-mlf
         cd caddy-mlf
         xcaddy build --with github.com/fabriziosalmi/caddy-mlf
         ```
-    Place the resulting binary in the Caddy modules directory (usually `~/.config/caddy/modules` or `/usr/local/lib/caddy/modules/`).
+        Place the resulting binary in the Caddy modules directory (usually `~/.config/caddy/modules` or `/usr/local/lib/caddy/modules/`).
 2.  **Update your Caddyfile**: Configure the `caddy-mlf` directive within your Caddyfile as shown below.
-
 3.  **Start Caddy:** Restart or reload Caddy to apply the changes.
 
 ## 2. Features
@@ -82,12 +81,12 @@ The anomaly score is calculated by combining normalized attribute scores with th
 
 1.  **Normalization:** Each attribute (request size, header count, query parameter count, path segment count) is normalized based on its configured `min` and `max` range.
     - If the value is within the normal range, the normalized value is `0.0`.
-    - If the value is less than the minimum, the value is the positive ratio of the difference from the minimum, divided by (min + 1)
-    - If the value is greater than the maximum, the value is the natural logarithm of the difference from the maximum, divided by (max + 1) + 1
-2.  **Weighting:**  Each normalized attribute is multiplied by its respective weight (`request_size_weight`, `header_count_weight`, etc.).
-3.  **Frequency Score:**  If `request_frequency_weight` is set, the request frequency over the `history_window` is calculated and multiplied by the frequency weight.
+    - If the value is less than the minimum, the value is the positive ratio of the difference from the minimum, divided by `(min + 1)`.
+    - If the value is greater than the maximum, the value is the natural logarithm of the difference from the maximum, divided by `(max + 1) + 1`.
+2.  **Weighting:** Each normalized attribute is multiplied by its respective weight (`request_size_weight`, `header_count_weight`, etc.).
+3.  **Frequency Score:** If `request_frequency_weight` is set, the request frequency over the `history_window` is calculated and multiplied by the frequency weight.
 4.  **Method, User-Agent, Referrer Scores:** Requests that do not match the defined `normal_http_methods`, `normal_user_agents`, and `normal_referrers` will be penalized by the weights: `http_method_weight`, `user_agent_weight`, and `referrer_weight`.
-5. **Correlation Score:** The history is checked for previous suspicious requests (above `anomaly_threshold`). A correlation score is added, giving more weight to suspicious traffic that is part of a correlated pattern over time.
+5.  **Correlation Score:** The history is checked for previous suspicious requests (above `anomaly_threshold`). A correlation score is added, giving more weight to suspicious traffic that is part of a correlated pattern over time.
 6.  **Total Score:** The weighted, normalized values are summed up to create the final anomaly score.
 
 ## 4. Caddyfile Configuration
@@ -153,35 +152,34 @@ The anomaly score is calculated by combining normalized attribute scores with th
 
 ### Global Options
 
-| Option                       | Type        | Default | Description                                                                                                                                                                   |
-| ---------------------------- | ----------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `anomaly_threshold`          | `float`     | `0.0`   | The threshold at which a request is considered suspicious. A value between 0 and 1 is recommended.                                                                          |
-| `blocking_threshold`         | `float`     | `0.0`   | The threshold at which a request is blocked. This value must be greater than `anomaly_threshold`. A value between 0 and 1 is recommended.                                  |
-| `normal_request_size_range`  | `int int`   |         | Defines the normal range of request sizes (in bytes) `min max`. Requests outside this range will contribute to the anomaly score.                                        |
-| `normal_header_count_range`  | `int int`   |         | Defines the normal range for the number of headers in a request `min max`. Requests with header counts outside this range will contribute to the anomaly score.             |
-| `normal_query_param_count_range`| `int int` |         | Defines the normal range for the number of query parameters in a request `min max`. Requests with query parameter counts outside this range will contribute to the anomaly score.|
-| `normal_path_segment_count_range`| `int int` |         | Defines the normal range for the number of segments in a request path `min max`. Requests with path segment counts outside this range will contribute to the anomaly score.  |
-| `normal_http_methods`        | `string...` |         | A list of HTTP methods considered normal (e.g., `GET`, `POST`). Requests using methods not in this list will be penalized based on `http_method_weight`.                      |
-| `normal_user_agents`         | `string...` |         | A list of User-Agent substrings considered normal. Requests with User-Agents that do not contain any of these substrings will be penalized based on `user_agent_weight`.     |
-| `normal_referrers`           | `string...` |         | A list of Referrer substrings considered normal. Requests with Referrers that do not contain any of these substrings will be penalized based on `referrer_weight`.           |
-| `request_size_weight`        | `float`     | `1.0`   | Weight for the request size in the anomaly score calculation. Adjust this to prioritize the impact of request size variations. Increase this to penalize unusual request sizes.  |
-| `header_count_weight`        | `float`     | `1.0`   | Weight for the header count in the anomaly score calculation. Increase this to emphasize requests with unusual header counts.                                              |
-| `query_param_count_weight`   | `float`     | `1.0`   | Weight for the query parameter count in the anomaly score calculation. Increase this to emphasize requests with unusual query parameter counts.                              |
-| `path_segment_count_weight`  | `float`     | `1.0`   | Weight for the path segment count in the anomaly score calculation. Increase this to emphasize requests with unusual path segment counts.                                 |
-| `http_method_weight`         | `float`     | `0.0`   | Weight to apply if a request's HTTP method is not within the `normal_http_methods` list. Useful to penalize unusual HTTP methods.                                          |
-| `user_agent_weight`          | `float`     | `0.0`   | Weight to apply if a request's User-Agent does not contain any of the `normal_user_agents` substrings. Useful to penalize requests with unusual User-Agents.                 |
-| `referrer_weight`           | `float`     | `0.0`   | Weight to apply if a request's Referrer does not contain any of the `normal_referrers` substrings. Useful to penalize requests with unusual Referrers.                       |
-| `request_frequency_weight`   | `float`     | `1.0`   | Weight for the request frequency in the anomaly score calculation. Increasing this makes the module more sensitive to high request rates from the same client.                |
-| `history_window`             | `duration`  | `1m`    | Duration for which request history is kept. Increase this for longer-term behavior analysis and decreased for shorter-term analysis.                                        |
-| `max_history_entries`        | `int`       | `10`    | Maximum number of request history entries per client IP to store. Adjust based on the `history_window` and the volume of traffic you expect to process.                       |
-
+| Option                       | Type        | Default | Description                                                                                                                                                                    |
+| ---------------------------- | ----------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `anomaly_threshold`          | `float`     | `0.0`   | The threshold at which a request is considered suspicious. A value between 0 and 1 is recommended.                                                                           |
+| `blocking_threshold`         | `float`     | `0.0`   | The threshold at which a request is blocked. This value must be greater than `anomaly_threshold`. A value between 0 and 1 is recommended.                                   |
+| `normal_request_size_range`  | `int int`   |         | Defines the normal range of request sizes (in bytes) `min max`. Requests outside this range will contribute to the anomaly score.                                         |
+| `normal_header_count_range`  | `int int`   |         | Defines the normal range for the number of headers in a request `min max`. Requests with header counts outside this range will contribute to the anomaly score.              |
+| `normal_query_param_count_range`| `int int` |         | Defines the normal range for the number of query parameters in a request `min max`. Requests with query parameter counts outside this range will contribute to the anomaly score. |
+| `normal_path_segment_count_range`| `int int` |         | Defines the normal range for the number of segments in a request path `min max`. Requests with path segment counts outside this range will contribute to the anomaly score.   |
+| `normal_http_methods`        | `string...` |         | A list of HTTP methods considered normal (e.g., `GET`, `POST`). Requests using methods not in this list will be penalized based on `http_method_weight`.                       |
+| `normal_user_agents`         | `string...` |         | A list of User-Agent substrings considered normal. Requests with User-Agents that do not contain any of these substrings will be penalized based on `user_agent_weight`.      |
+| `normal_referrers`           | `string...` |         | A list of Referrer substrings considered normal. Requests with Referrers that do not contain any of these substrings will be penalized based on `referrer_weight`.            |
+| `request_size_weight`        | `float`     | `1.0`   | Weight for the request size in the anomaly score calculation. Adjust this to prioritize the impact of request size variations. Increase this to penalize unusual request sizes.   |
+| `header_count_weight`        | `float`     | `1.0`   | Weight for the header count in the anomaly score calculation. Increase this to emphasize requests with unusual header counts.                                               |
+| `query_param_count_weight`   | `float`     | `1.0`   | Weight for the query parameter count in the anomaly score calculation. Increase this to emphasize requests with unusual query parameter counts.                               |
+| `path_segment_count_weight`  | `float`     | `1.0`   | Weight for the path segment count in the anomaly score calculation. Increase this to emphasize requests with unusual path segment counts.                                  |
+| `http_method_weight`         | `float`     | `0.0`   | Weight to apply if a request's HTTP method is not within the `normal_http_methods` list. Useful to penalize unusual HTTP methods.                                           |
+| `user_agent_weight`          | `float`     | `0.0`   | Weight to apply if a request's User-Agent does not contain any of the `normal_user_agents` substrings. Useful to penalize requests with unusual User-Agents.                  |
+| `referrer_weight`           | `float`     | `0.0`   | Weight to apply if a request's Referrer does not contain any of the `normal_referrers` substrings. Useful to penalize requests with unusual Referrers.                        |
+| `request_frequency_weight`   | `float`     | `1.0`   | Weight for the request frequency in the anomaly score calculation. Increasing this makes the module more sensitive to high request rates from the same client.                 |
+| `history_window`             | `duration`  | `1m`    | Duration for which request history is kept. Increase this for longer-term behavior analysis and decreased for shorter-term analysis.                                         |
+| `max_history_entries`        | `int`       | `10`    | Maximum number of request history entries per client IP to store. Adjust based on the `history_window` and the volume of traffic you expect to process.                        |
 
 ### Per-Path Configuration (`per_path_config`)
 
 -   **`per_path_config <path> { ... }`**: Allows you to set different `anomaly_threshold` and `blocking_threshold` options for a specific path.
     -   **`anomaly_threshold`**: `float`. Overrides the global `anomaly_threshold` for this path.
     -   **`blocking_threshold`**: `float`. Overrides the global `blocking_threshold` for this path.
-      
+
 ## 6. Use Cases and Examples
 
 Here are some practical use cases with example configurations:
@@ -208,9 +206,9 @@ ml_waf {
 
 **Explanation:**
 
--   **`request_frequency_weight 0.3`**: Emphasizes request frequency to detect rapid login attempts.
--   **`history_window 1m`**: Tracks recent requests for quick detection.
--   **`max_history_entries 50`**: Limits the history to a reasonable amount.
+-   `request_frequency_weight 0.3`: Emphasizes request frequency to detect rapid login attempts.
+-   `history_window 1m`: Tracks recent requests for quick detection.
+-   `max_history_entries 50`: Limits the history to a reasonable amount.
 
 ### 2. Mitigating DDoS Attacks
 
@@ -235,9 +233,9 @@ ml_waf {
 
 **Explanation:**
 
--   **`request_frequency_weight 0.15`**: A moderate weight is assigned for request frequency.
--   **`history_window 10m`**: Examines traffic over a longer period for distributed attacks.
--   **`max_history_entries 100`**: A larger history is kept for identifying larger attacks.
+-   `request_frequency_weight 0.15`: A moderate weight is assigned for request frequency.
+-   `history_window 10m`: Examines traffic over a longer period for distributed attacks.
+-   `max_history_entries 100`: A larger history is kept for identifying larger attacks.
 
 ### 3. Preventing Scanning Activities
 
@@ -260,9 +258,9 @@ ml_waf {
 
 **Explanation:**
 
--   **`request_frequency_weight 0.1`**: Reduces the focus on frequency, emphasizing other request features.
--   **`history_window 5m`**: Tracks requests over a moderate window for scanning activity.
--   **`max_history_entries 50`**: Keeps a reasonable history size.
+-   `request_frequency_weight 0.1`: Reduces the focus on frequency, emphasizing other request features.
+-   `history_window 5m`: Tracks requests over a moderate window for scanning activity.
+-   `max_history_entries 50`: Keeps a reasonable history size.
 
 ### 4. Protecting Specific Endpoints
 
@@ -308,8 +306,8 @@ The `caddy-mlf` module uses weights to determine the contribution of different r
 -   **Increase weights** for attributes that are more indicative of malicious activity for your application. For example:
     *   If your application is often targeted by brute-force attacks with large request sizes, increase `request_size_weight`.
     *   If you see attacks using unusual headers, increase `header_count_weight`.
-    *   If you have an API with a well defined set of methods, increase `http_method_weight`.
-    *    If your legitimate users use well-known user-agents, increase `user_agent_weight`
+    *    If you have an API with a well-defined set of methods, increase `http_method_weight`.
+    *    If your legitimate users use well-known user-agents, increase `user_agent_weight`.
 -   **Decrease weights** for attributes that are less relevant to security in your specific scenario. For example:
     *   If your application handles a lot of large data uploads that are not typically malicious, decrease `request_size_weight`.
     *   If you have a lot of legitimate requests with varying numbers of query parameters, decrease `query_param_count_weight`.
@@ -346,7 +344,7 @@ Thresholds determine when a request is considered suspicious or is blocked. Sett
     *   If you see malicious requests getting through, lower your `blocking_threshold`.
 -   **Use per-path configurations** to apply tighter rules to more sensitive parts of your application. For instance:
 
-     ```caddyfile
+    ```caddyfile
         ml_waf {
             anomaly_threshold 0.4      # Global settings
             blocking_threshold 0.7
@@ -358,7 +356,7 @@ Thresholds determine when a request is considered suspicious or is blocked. Sett
         }
     ```
 
-- **Consider environment:** The right thresholds might depend on your environment and application. A more security-critical application might require lower thresholds and more aggressive rules compared to a low-impact application.
+-   **Consider environment:** The right thresholds might depend on your environment and application. A more security-critical application might require lower thresholds and more aggressive rules compared to a low-impact application.
 
 ### Understanding Request History
 
@@ -366,6 +364,7 @@ The request history mechanism helps to identify patterns of attack and correlate
 
 -   **`history_window`:** Set this value based on your observation window. If your application needs quick reaction times to attacks that occur in short bursts, shorten the window. For slower attacks (like scanning activities or low-frequency brute-force attempts), keep a longer window.
     *   **Short Window (e.g., 1-5 minutes):** Suitable for quickly detecting and reacting to sudden spikes in activity, such as brute-force login attempts.
+
         ```caddyfile
         ml_waf {
             history_window 2m
@@ -373,15 +372,17 @@ The request history mechanism helps to identify patterns of attack and correlate
         }
         ```
     *   **Longer Window (e.g., 10+ minutes):** Better for detecting distributed attacks or slow scanning behavior that might not be obvious over a short time.
-    ```caddyfile
+
+        ```caddyfile
          ml_waf {
              history_window 20m
              # ... other options
          }
-    ```
+        ```
 -   **`max_history_entries`:** Adjust the number of entries based on traffic volume and your system's memory capabilities.
     *   **Lower values:** Use lower values when dealing with high traffic to avoid high memory usage. This will keep the memory footprint small.
     *   **Higher values:** Use higher values if you have low traffic and want to be able to track more requests. This is useful when looking for very specific attack patterns. Be aware that this can consume more memory.
+
         ```caddyfile
             ml_waf {
                 max_history_entries 500
@@ -389,8 +390,8 @@ The request history mechanism helps to identify patterns of attack and correlate
             }
         ```
 -   **Monitor:** Keep an eye on your logs, where information about the history and anomaly score of every request is logged using the `debug` level. Look for patterns in anomaly scores over time for specific IPs to get insights into the behavior of potential attackers.
-- **Adjust history along with request frequency:** When you tune `request_frequency_weight`, you should adjust `history_window` and `max_history_entries` to match your expected traffic and attack patterns. A very high `request_frequency_weight` will probably need a lower history window, and less entries.
-  
+-   **Adjust history along with request frequency:** When you tune `request_frequency_weight`, you should adjust `history_window` and `max_history_entries` to match your expected traffic and attack patterns. A very high `request_frequency_weight` will probably need a lower history window and fewer entries.
+
 ## 8. Troubleshooting
 
 ### Detailed Debugging
@@ -426,7 +427,7 @@ This provides detailed information about each request, the calculated anomaly sc
     *   Optimizing your Caddy configuration.
     *   Ensuring that your system has adequate resources.
 
-4. **Module Not Loaded:** If the module doesn't work, ensure the module binary is placed correctly, and caddy is restarted correctly.
+4.  **Module Not Loaded:** If the module doesn't work, ensure the module binary is placed correctly and that Caddy is restarted correctly.
 
 ## 9. Contributing
 
