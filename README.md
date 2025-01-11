@@ -537,7 +537,7 @@ ml_waf {
 
 ## Contributing
 
-Contributions to the `caddy-mlf` module are welcome! Whether you're reporting a bug, suggesting an enhancement, or submitting a pull request, your input is valuable. Please follow the contribution guidelines outlined in the repository and ensure that your changes align with the project's goals. We encourage contributions that enhance the module's functionality, improve its performance, or expand its educational value.
+Contributions to the `caddy-mlf` module are welcome! 
 
 ## License
 
