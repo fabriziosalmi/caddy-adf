@@ -153,32 +153,35 @@ The anomaly score is calculated by combining normalized attribute scores with th
 
 ### Global Options
 
--   **`anomaly_threshold`**: `float` (default: `0.0`). The threshold at which a request is considered suspicious. A value between 0 and 1 is recommended.
--   **`blocking_threshold`**: `float` (default: `0.0`). The threshold at which a request is blocked. This value must be greater than `anomaly_threshold`. A value between 0 and 1 is recommended.
--   **`normal_request_size_range`**: `int int`. Defines the normal range of request sizes (in bytes) `min max`. Requests outside this range will contribute to the anomaly score.
--   **`normal_header_count_range`**: `int int`. Defines the normal range for the number of headers in a request `min max`. Requests with header counts outside this range will contribute to the anomaly score.
--   **`normal_query_param_count_range`**: `int int`. Defines the normal range for the number of query parameters in a request `min max`. Requests with query parameter counts outside this range will contribute to the anomaly score.
--   **`normal_path_segment_count_range`**: `int int`. Defines the normal range for the number of segments in a request path `min max`. Requests with path segment counts outside this range will contribute to the anomaly score.
--   **`normal_http_methods`**: `string...`. A list of HTTP methods considered normal (e.g., `GET`, `POST`). Requests using methods not in this list will be penalized based on `http_method_weight`.
--   **`normal_user_agents`**: `string...`. A list of User-Agent substrings considered normal. Requests with User-Agents that do not contain any of these substrings will be penalized based on `user_agent_weight`.
--   **`normal_referrers`**: `string...`. A list of Referrer substrings considered normal. Requests with Referrers that do not contain any of these substrings will be penalized based on `referrer_weight`.
--    **`request_size_weight`**: `float` (default: `1.0`). Weight for the request size in the anomaly score calculation. Adjust this to prioritize the impact of request size variations. Increase this to penalize unusual request sizes.
--   **`header_count_weight`**: `float` (default: `1.0`). Weight for the header count in the anomaly score calculation. Increase this to emphasize requests with unusual header counts.
--   **`query_param_count_weight`**: `float` (default: `1.0`). Weight for the query parameter count in the anomaly score calculation. Increase this to emphasize requests with unusual query parameter counts.
--   **`path_segment_count_weight`**: `float` (default: `1.0`). Weight for the path segment count in the anomaly score calculation. Increase this to emphasize requests with unusual path segment counts.
--   **`http_method_weight`**: `float` (default: `0.0`). Weight to apply if a request's HTTP method is not within the `normal_http_methods` list. Useful to penalize unusual HTTP methods.
--   **`user_agent_weight`**: `float` (default: `0.0`). Weight to apply if a request's User-Agent does not contain any of the `normal_user_agents` substrings. Useful to penalize requests with unusual User-Agents.
--   **`referrer_weight`**: `float` (default: `0.0`). Weight to apply if a request's Referrer does not contain any of the `normal_referrers` substrings. Useful to penalize requests with unusual Referrers.
--   **`request_frequency_weight`**: `float` (default: `1.0`). Weight for the request frequency in the anomaly score calculation. Increasing this makes the module more sensitive to high request rates from the same client.
--   **`history_window`**: `duration` (default: `1m`). Duration for which request history is kept. Increase this for longer-term behavior analysis and decreased for shorter-term analysis.
--   **`max_history_entries`**: `int` (default: `10`). Maximum number of request history entries per client IP to store. Adjust based on the `history_window` and the volume of traffic you expect to process.
+| Option                       | Type        | Default | Description                                                                                                                                                                   |
+| ---------------------------- | ----------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `anomaly_threshold`          | `float`     | `0.0`   | The threshold at which a request is considered suspicious. A value between 0 and 1 is recommended.                                                                          |
+| `blocking_threshold`         | `float`     | `0.0`   | The threshold at which a request is blocked. This value must be greater than `anomaly_threshold`. A value between 0 and 1 is recommended.                                  |
+| `normal_request_size_range`  | `int int`   |         | Defines the normal range of request sizes (in bytes) `min max`. Requests outside this range will contribute to the anomaly score.                                        |
+| `normal_header_count_range`  | `int int`   |         | Defines the normal range for the number of headers in a request `min max`. Requests with header counts outside this range will contribute to the anomaly score.             |
+| `normal_query_param_count_range`| `int int` |         | Defines the normal range for the number of query parameters in a request `min max`. Requests with query parameter counts outside this range will contribute to the anomaly score.|
+| `normal_path_segment_count_range`| `int int` |         | Defines the normal range for the number of segments in a request path `min max`. Requests with path segment counts outside this range will contribute to the anomaly score.  |
+| `normal_http_methods`        | `string...` |         | A list of HTTP methods considered normal (e.g., `GET`, `POST`). Requests using methods not in this list will be penalized based on `http_method_weight`.                      |
+| `normal_user_agents`         | `string...` |         | A list of User-Agent substrings considered normal. Requests with User-Agents that do not contain any of these substrings will be penalized based on `user_agent_weight`.     |
+| `normal_referrers`           | `string...` |         | A list of Referrer substrings considered normal. Requests with Referrers that do not contain any of these substrings will be penalized based on `referrer_weight`.           |
+| `request_size_weight`        | `float`     | `1.0`   | Weight for the request size in the anomaly score calculation. Adjust this to prioritize the impact of request size variations. Increase this to penalize unusual request sizes.  |
+| `header_count_weight`        | `float`     | `1.0`   | Weight for the header count in the anomaly score calculation. Increase this to emphasize requests with unusual header counts.                                              |
+| `query_param_count_weight`   | `float`     | `1.0`   | Weight for the query parameter count in the anomaly score calculation. Increase this to emphasize requests with unusual query parameter counts.                              |
+| `path_segment_count_weight`  | `float`     | `1.0`   | Weight for the path segment count in the anomaly score calculation. Increase this to emphasize requests with unusual path segment counts.                                 |
+| `http_method_weight`         | `float`     | `0.0`   | Weight to apply if a request's HTTP method is not within the `normal_http_methods` list. Useful to penalize unusual HTTP methods.                                          |
+| `user_agent_weight`          | `float`     | `0.0`   | Weight to apply if a request's User-Agent does not contain any of the `normal_user_agents` substrings. Useful to penalize requests with unusual User-Agents.                 |
+| `referrer_weight`           | `float`     | `0.0`   | Weight to apply if a request's Referrer does not contain any of the `normal_referrers` substrings. Useful to penalize requests with unusual Referrers.                       |
+| `request_frequency_weight`   | `float`     | `1.0`   | Weight for the request frequency in the anomaly score calculation. Increasing this makes the module more sensitive to high request rates from the same client.                |
+| `history_window`             | `duration`  | `1m`    | Duration for which request history is kept. Increase this for longer-term behavior analysis and decreased for shorter-term analysis.                                        |
+| `max_history_entries`        | `int`       | `10`    | Maximum number of request history entries per client IP to store. Adjust based on the `history_window` and the volume of traffic you expect to process.                       |
+
 
 ### Per-Path Configuration (`per_path_config`)
 
 -   **`per_path_config <path> { ... }`**: Allows you to set different `anomaly_threshold` and `blocking_threshold` options for a specific path.
     -   **`anomaly_threshold`**: `float`. Overrides the global `anomaly_threshold` for this path.
     -   **`blocking_threshold`**: `float`. Overrides the global `blocking_threshold` for this path.
-
+      
 ## 6. Use Cases and Examples
 
 Here are some practical use cases with example configurations:
