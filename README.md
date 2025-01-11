@@ -1,4 +1,4 @@
-# Caddy ADF (caddy-adf)
+# Caddy ADF (Anomaly Detection Filter)
 
 [![Go](https://github.com/fabriziosalmi/caddy-adf/actions/workflows/go.yml/badge.svg)](https://github.com/fabriziosalmi/caddy-adf/actions/workflows/go.yml)
 [![CodeQL](https://github.com/fabriziosalmi/caddy-adf/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/fabriziosalmi/caddy-adf/actions/workflows/github-code-scanning/codeql)
