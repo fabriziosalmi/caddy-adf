@@ -1,65 +1,106 @@
 {
     admin off
     log {
-        level info
+        level debug
     }
     order ml_waf before respond
 }
 
 :8082 {
-    
     handle {
         ml_waf {
-            # Thresholds
-            anomaly_threshold 0.2                  # Reduced to detect anomalies earlier
-            blocking_threshold 0.4                 # Slightly reduced to enforce stricter blocking
+            # Global Thresholds
+            anomaly_threshold 0.2    # Lowered global anomaly threshold
+            blocking_threshold 0.7  # Increased global blocking threshold
 
-            # Normal ranges for request attributes
-            normal_request_size_range 100 3000      # Adjusted for stricter request sizes
-            normal_header_count_range 3 15         # Reduced to limit excessive headers
-            normal_query_param_count_range 0 8     # Reduced to limit excessive query parameters
-            normal_path_segment_count_range 1 5    # Unchanged
+            # Normal Ranges for Request Attributes
+            normal_request_size_range 100 5000 # Increased max request size
+            normal_header_count_range 3 25  # Wider range for header count
+            normal_query_param_count_range 0 15 # Increased max query params
+            normal_path_segment_count_range 1 7  # Wider range for path segments
 
-            # Additional attributes
-            normal_http_methods GET POST PUT DELETE OPTIONS  # Extended allowed HTTP methods
-            normal_user_agents fab Mozilla Chrome Edge Firefox Safari      # Extended User-Agent list
-            normal_referrers https://example.com https://trusted.example.org  # Extended trusted Referrers
+            # Normal HTTP Methods, User Agents, and Referrers
+            normal_http_methods GET POST PUT DELETE OPTIONS HEAD
+            normal_user_agents fab Mozilla Chrome Safari python-requests/2.32.3 curl
+            normal_referrers https://example.com https://trusted.example.org
 
-            # Weights (sum = 1)
-            request_size_weight 0.3               # Increased to prioritize request size
-            header_count_weight 0.3               # Unchanged
-            query_param_count_weight 0.3         # Unchanged
-            http_method_weight 0.1                # Unchanged
-            user_agent_weight 0.1                 # Unchanged
-            referrer_weight 0.05                  # Unchanged
-            path_segment_count_weight 0.1        # Unchanged
-            request_frequency_weight 0.6         # Adjusted to better account for bursts
+            # Weights - Using a mix of traditional and ML
+            request_size_weight 0.1
+            header_count_weight 0.1
+            query_param_count_weight 0.05
+            path_segment_count_weight 0.05
+            http_method_weight 0.1
+            user_agent_weight 0.05      # Reduced User-Agent weight
+            referrer_weight 0.05      # Reduced Referrer weight
+            request_frequency_weight 0.1   # Increased request frequency weight
 
-            # Request history settings
-            history_window 5m                      # Unchanged
-            max_history_entries 5000              # Reduced to conserve memory
+            # Request History Settings
+            history_window 10m # Increased history window
+            max_history_entries 2000 # Increased number of history entries
 
-            # Per-path configuration for stricter paths
-            per_path_config /etc/passwd {
-                anomaly_threshold 0.01            # Stricter anomaly detection
-                blocking_threshold 0.05           # Immediate blocking for critical paths
+            # Enable ML and Model Path
+            enable_ml true
+            model_path pre-trained.model
+
+             # Redaction List
+            header_redaction_list Authorization Cookie Set-Cookie X-Api-Key
+            query_param_redaction_list token password api_key secret
+
+            # Dynamic Thresholds (disabled by default)
+             dynamic_threshold_enabled false # Enable or disable dynamic anomaly threshold calculation
+            dynamic_threshold_factor 1.2 # Factor to be applied to the moving average.
+
+            # Per-Path Configurations (Using regex)
+            per_path_config "^/api/v[0-9]+(/.*)?$" {  # API endpoints with versioning
+                anomaly_threshold 0.1
+                blocking_threshold 0.5
             }
-            per_path_config /.env {
-                anomaly_threshold 0.01
-                blocking_threshold 0.05
+
+            per_path_config "^/admin(/.*)?$" {  # Admin interface
+                anomaly_threshold 0.02
+                blocking_threshold 0.2
             }
-            per_path_config /api {
-                anomaly_threshold 0.15            # Balanced threshold for APIs
+            per_path_config "^/public(/.*)?$" { # Public facing assets
+				anomaly_threshold 0.15
+				blocking_threshold 0.4
+			}
+            per_path_config "^/images(/.*)?$" { # Image resources, less strict rules
+                anomaly_threshold 0.2
+                blocking_threshold 0.6
+            }
+
+            per_path_config "^/upload(/.*)?$" { # Upload endpoints, more strict rules
+                 anomaly_threshold 0.25
+                blocking_threshold 0.8
+            }
+             per_path_config "/download" { # Download endpoint with strict rules
+                anomaly_threshold 0.3
+                blocking_threshold 0.7
+            }
+
+             per_path_config "^/blog(/.*)?$" {   # Content creation endpoint
+                anomaly_threshold 0.15
+                blocking_threshold 0.35
+            }
+             per_path_config "^/user(/.*)?$" {   # User management endpoint
+                anomaly_threshold 0.1
                 blocking_threshold 0.3
             }
-            per_path_config /login {
-                anomaly_threshold 0.1             # Stricter for sensitive login paths
+            per_path_config "^/auth(/.*)?$" { # Authentications endpoints
+                anomaly_threshold 0.08
                 blocking_threshold 0.25
             }
-            per_path_config /home {
-                anomaly_threshold 0.6            # Stricter for sensitive login paths
-                blocking_threshold 2
+             per_path_config "^/data(/.*)?$" { # Data endpoints
+                anomaly_threshold 0.12
+                blocking_threshold 0.32
             }
+
+            per_path_config "/health" { # Health endpoint, least strict, not blocked ever
+                anomaly_threshold 1
+                blocking_threshold 10
+            }
+
+
         }
         respond "Hello, world!" 200
     }
