@@ -217,39 +217,9 @@ If a `per_path_config` is not defined for a given path, the `default_path_config
                 anomaly_threshold 0.02
                 blocking_threshold 0.2
             }
-             per_path_config "^/public(/.*)?$" { # Public facing assets
-				anomaly_threshold 0.15
-				blocking_threshold 0.4
-			}
-            per_path_config "^/images(/.*)?$" { # Image resources, less strict rules
-                anomaly_threshold 0.2
-                blocking_threshold 0.6
-            }
-
-            per_path_config "^/upload(/.*)?$" { # Upload endpoints, more strict rules
-                 anomaly_threshold 0.25
-                blocking_threshold 0.8
-            }
              per_path_config "/download" { # Download endpoint with strict rules
                 anomaly_threshold 0.3
                 blocking_threshold 0.7
-            }
-
-             per_path_config "^/blog(/.*)?$" {   # Content creation endpoint
-                anomaly_threshold 0.15
-                blocking_threshold 0.35
-            }
-             per_path_config "^/user(/.*)?$" {   # User management endpoint
-                anomaly_threshold 0.1
-                blocking_threshold 0.3
-            }
-            per_path_config "^/auth(/.*)?$" { # Authentications endpoints
-                anomaly_threshold 0.08
-                blocking_threshold 0.25
-            }
-             per_path_config "^/data(/.*)?$" { # Data endpoints
-                anomaly_threshold 0.12
-                blocking_threshold 0.32
             }
 
             per_path_config "/health" { # Health endpoint, least strict, not blocked ever
