@@ -272,11 +272,8 @@ If a `per_path_config` is not defined for a given path, the `default_path_config
 
     ```caddyfile
     ml_waf {
-         normalization_config request_size linear
-         normalization_config header_count log
-         normalization_config query_param_count linear
-         normalization_config path_segment_count log
-         normalization_config referrer linear
+            # Normalization Configuration
+            normalization_config request_size linear header_count log query_param_count linear path_segment_count log referrer linear
     }
     ```
 
@@ -286,11 +283,33 @@ If a `per_path_config` is not defined for a given path, the `default_path_config
     -   **`anomaly_threshold`**: `float`. Overrides the global `anomaly_threshold` for this path.
     -   **`blocking_threshold`**: `float`. Overrides the global `blocking_threshold` for this path.
 
+
+```
+            # Per-Path Configurations (Using regex)
+            per_path_config "^/api/v[0-9]+(/.*)?$" {  # API endpoints with versioning
+                anomaly_threshold 0.1
+                blocking_threshold 0.5
+            }
+
+            per_path_config "^/admin(/.*)?$" {  # Admin interface
+                anomaly_threshold 0.02
+                blocking_threshold 0.2
+            }
+```
+
 #### Default Path Configuration
 
 -   **`default_path_config { ... }`**: Allows you to set default values for the per-path configuration, to be used when a path is not defined.
     -   **`anomaly_threshold`**: `float`. The anomaly_threshold to be used as the default.
     -   **`blocking_threshold`**: `float`. The blocking_threshold to be used as the default.
+
+```
+             # Default Per-Path Configuration
+            default_path_config {
+                anomaly_threshold 0.1
+                blocking_threshold 0.4
+            }
+```
 
 ## 6. Use Cases and Examples
 
