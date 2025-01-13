@@ -138,7 +138,7 @@ func (m *MLWAF) Provision(ctx caddy.Context) error {
 	m.requestSanitizer = NewRequestSanitizer(m.HeaderRedactionList, m.QueryParamRedactionList)
 	// Initialize RequestNormalizer
 	m.requestNormalizer = NewRequestNormalizer()
-	//Initialize Admin Endpoint
+	// Initialize Admin Endpoint
 	m.adminEndpoint = NewAdminEndpoint(m, m.logger)
 
 	if m.DynamicThresholdEnabled {
@@ -154,6 +154,26 @@ func (m *MLWAF) Provision(ctx caddy.Context) error {
 
 	if m.EnableML {
 		initializeMLModel(m.ModelPath, m.logger)
+
+		// Configure feature mappers based on the model's expected structure
+		// **IMPORTANT:** Adapt this section based on how your pre-trained model is structured.
+		// Inspect your 'pre-trained.model' to see the exact feature names.
+
+		// Scenario 1: Model uses simple feature names (e.g., "request_size")
+		// In this case, we don't set specific mappers, and rely on the default
+		// normalizeFeature behavior (after the suggested modification).
+
+		// Scenario 2: Model uses value-based feature names (e.g., "request_size_0")
+		// Add mappers to explicitly define how features are normalized.
+		model.SetFeatureMapper("request_size", []string{}, "", m.logger)
+		model.SetFeatureMapper("header_count", []string{}, "", m.logger)
+		model.SetFeatureMapper("query_param_count", []string{}, "", m.logger)
+		model.SetFeatureMapper("path_segment_count", []string{}, "", m.logger)
+		model.SetFeatureMapper("http_method", []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"}, "", m.logger)
+		model.SetFeatureMapper("user_agent", []string{"fab", "Mozilla", "Chrome", "Safari", "python-requests/2.32.3", "curl"}, "", m.logger)
+		model.SetFeatureMapper("referrer", []string{"https://example.com", "https://trusted.example.org"}, "", m.logger)
+
+		m.logger.Info("ML Feature Mappers configured.")
 	}
 
 	return nil

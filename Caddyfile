@@ -10,18 +10,18 @@
     handle {
         ml_waf {
             # Global Thresholds
-            anomaly_threshold 0.2    # Lowered global anomaly threshold
-            blocking_threshold 0.7  # Increased global blocking threshold
+            anomaly_threshold 0.2
+            blocking_threshold 0.7
 
             # Normal Ranges for Request Attributes
-            normal_request_size_range 100 5000 # Increased max request size
-            normal_header_count_range 3 25  # Wider range for header count
-            normal_query_param_count_range 0 15 # Increased max query params
-            normal_path_segment_count_range 1 7  # Wider range for path segments
+            normal_request_size_range 100 5000
+            normal_header_count_range 3 25
+            normal_query_param_count_range 0 15
+            normal_path_segment_count_range 1 7
 
             # Normal HTTP Methods, User Agents, and Referrers
             normal_http_methods GET POST PUT DELETE OPTIONS HEAD
-            normal_user_agents fab Mozilla Chrome Safari python-requests/2.32.3 curl
+            normal_user_agents Mozilla Chrome Safari python-requests/2.32.3 curl
             normal_referrers https://example.com https://trusted.example.org
 
             # Weights - Using a mix of traditional and ML
@@ -30,13 +30,13 @@
             query_param_count_weight 0.05
             path_segment_count_weight 0.05
             http_method_weight 0.1
-            user_agent_weight 0.05      # Reduced User-Agent weight
-            referrer_weight 0.05      # Reduced Referrer weight
-            request_frequency_weight 0.1   # Increased request frequency weight
+            user_agent_weight 0.05
+            referrer_weight 0.05
+            request_frequency_weight 0.1
 
             # Request History Settings
-            history_window 10m # Increased history window
-            max_history_entries 2000 # Increased number of history entries
+            history_window 10m
+            max_history_entries 2000
 
             # Enable ML and Model Path
             enable_ml true
@@ -47,8 +47,17 @@
             query_param_redaction_list token password api_key secret
 
             # Dynamic Thresholds (disabled by default)
-             dynamic_threshold_enabled false # Enable or disable dynamic anomaly threshold calculation
-            dynamic_threshold_factor 1.2 # Factor to be applied to the moving average.
+            dynamic_threshold_enabled false
+            dynamic_threshold_factor 1.2
+
+            # Normalization Configuration
+            normalization_config request_size linear header_count log query_param_count linear path_segment_count log referrer linear
+
+             # Default Per-Path Configuration
+            default_path_config {
+                anomaly_threshold 0.1
+                blocking_threshold 0.4
+            }
 
             # Per-Path Configurations (Using regex)
             per_path_config "^/api/v[0-9]+(/.*)?$" {  # API endpoints with versioning
@@ -60,7 +69,7 @@
                 anomaly_threshold 0.02
                 blocking_threshold 0.2
             }
-            per_path_config "^/public(/.*)?$" { # Public facing assets
+             per_path_config "^/public(/.*)?$" { # Public facing assets
 				anomaly_threshold 0.15
 				blocking_threshold 0.4
 			}
@@ -99,8 +108,6 @@
                 anomaly_threshold 1
                 blocking_threshold 10
             }
-
-
         }
         respond "Hello, world!" 200
     }

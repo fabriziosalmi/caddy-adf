@@ -327,24 +327,20 @@ func (cu *CaddyfileUnmarshaler) UnmarshalCaddyfile(m *MLWAF, d *caddyfile.Dispen
 					}
 				}
 			case "normalization_config":
-				for d.NextBlock(1) {
-					if !d.NextArg() {
-						return d.ArgErr()
-					}
+				if m.normalizationConfig == nil {
+					m.normalizationConfig = make(map[string]string)
+				}
+				for d.NextArg() {
 					feature := d.Val()
 					if !d.NextArg() {
 						return d.ArgErr()
 					}
 					normalizerType := d.Val()
-					if normalizerType != string(LinearNormalizer) && normalizerType != string(LogNormalizer) {
-						return d.Errf("unrecognized normalizer type %s", normalizerType)
-					}
-					if m.normalizationConfig == nil {
-						m.normalizationConfig = make(map[string]string)
+					if normalizerType != "linear" && normalizerType != "log" {
+						return d.Errf("unrecognized normalizer type %s for feature %s", normalizerType, feature)
 					}
 					m.normalizationConfig[feature] = normalizerType
 				}
-
 			default:
 				return d.Errf("unrecognized option: %s", d.Val())
 			}

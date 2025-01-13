@@ -11,26 +11,32 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	FeatureRequestSize      = "request_size"
+	FeatureHeaderCount      = "header_count"
+	FeatureQueryParamCount  = "query_param_count"
+	FeaturePathSegmentCount = "path_segment_count"
+	FeatureHTTPMethod       = "http_method"
+	FeatureUserAgent        = "user_agent"
+	FeatureReferrer         = "referrer"
+)
+
 // Default score for missing features
 const defaultFeatureScore = 0.1
 
-// Feature thresholds
-const (
-	smallRequestSizeThreshold    = 500
-	mediumRequestSizeThreshold   = 2000
-	smallHeaderCountThreshold    = 10
-	mediumHeaderCountThreshold   = 20
-	smallQueryParamCount         = 3
-	mediumQueryParamCount        = 10
-	singlePathSegmentThreshold   = 1
-	multiplePathSegmentThreshold = 5
-)
-
 // mlModel encapsulates the ML scoring model.
 type mlModel struct {
-	featureScores map[string]float64
-	mu            sync.RWMutex
-	logger        *zap.Logger
+	featureScores  map[string]float64
+	featureMappers map[string]featureMapper
+	mu             sync.RWMutex
+	logger         *zap.Logger
+}
+
+// featureMapper is a struct that contains the mapping and normalization of a single feature
+type featureMapper struct {
+	featureName string
+	featureKeys []string
+	normalizer  string
 }
 
 var model *mlModel
@@ -42,7 +48,8 @@ func init() {
 // newMLModel initializes a new mlModel instance.
 func newMLModel() *mlModel {
 	return &mlModel{
-		featureScores: make(map[string]float64),
+		featureScores:  make(map[string]float64),
+		featureMappers: make(map[string]featureMapper),
 	}
 }
 
@@ -86,80 +93,13 @@ func (m *mlModel) loadModel(modelPath string, logger *zap.Logger) error {
 }
 
 // normalizeFeature dynamically maps input feature values into meaningful model keys.
-func normalizeFeature(feature string, value interface{}) string {
-	switch feature {
-	case "request_size":
-		if size, ok := value.(int64); ok {
-			if size == 0 {
-				return "request_size_small"
-			} else if size < 1000 {
-				return "request_size_medium"
-			} else {
-				return "request_size_large"
-			}
-		}
-	case "header_count":
-		if count, ok := value.(int); ok {
-			if count <= 5 {
-				return "header_count_small"
-			} else if count <= 15 {
-				return "header_count_medium"
-			} else {
-				return "header_count_large"
-			}
-		}
-
-	case "query_param_count":
-		if count, ok := value.(int); ok {
-			if count <= 1 {
-				return "query_param_count_few"
-			} else if count <= 5 {
-				return "query_param_count_medium"
-			} else {
-				return "query_param_count_many"
-			}
-		}
-	case "path_segment_count":
-		if count, ok := value.(int); ok {
-			if count == 1 {
-				return "path_segment_count_single"
-			} else if count <= 3 {
-				return "path_segment_count_few"
-			} else {
-				return "path_segment_count_many"
-			}
-		}
-	case "user_agent":
-		if ua, ok := value.(string); ok {
-			if strings.Contains(ua, "python-requests") {
-				return "user_agent_python_requests"
-			} else if strings.Contains(ua, "Mozilla") {
-				if strings.Contains(ua, "fab") {
-					return "user_agent_fab"
-				}
-				return "user_agent_mozilla"
-			} else if strings.Contains(ua, "fab") {
-				return "user_agent_fab"
-			} else {
-				return "user_agent_other"
-			}
-		}
-
-	case "referrer":
-		if ref, ok := value.(string); ok {
-			if ref == "" {
-				return "referrer_empty"
-			} else if strings.Contains(ref, "example.com") {
-				return "referrer_example"
-			} else if strings.Contains(ref, "evil.com") {
-				return "referrer_https://evil.com"
-			} else {
-				return "referrer_other"
-			}
-		}
-
+func (m *mlModel) normalizeFeature(feature string, value interface{}, logger *zap.Logger) string {
+	if mapper, ok := m.featureMappers[feature]; ok {
+		return fmt.Sprintf("%s_%v", mapper.featureName, value)
 	}
-	return fmt.Sprintf("%s_%v", feature, value)
+
+	logger.Warn("Unrecognized feature, using default value", zap.String("feature", feature))
+	return feature // Return the feature name directly
 }
 
 // calculateMLScore computes the anomaly score based on normalized features.
@@ -169,13 +109,13 @@ func (m *mlModel) calculateMLScore(requestSize int64, headerCount, queryParamCou
 	defer m.mu.RUnlock()
 
 	features := []string{
-		normalizeFeature("request_size", requestSize),
-		normalizeFeature("header_count", headerCount),
-		normalizeFeature("query_param_count", queryParamCount),
-		normalizeFeature("path_segment_count", pathSegmentCount),
-		normalizeFeature("http_method", httpMethod),
-		normalizeFeature("user_agent", userAgent),
-		normalizeFeature("referrer", referrer),
+		m.normalizeFeature("request_size", requestSize, logger),
+		m.normalizeFeature("header_count", headerCount, logger),
+		m.normalizeFeature("query_param_count", queryParamCount, logger),
+		m.normalizeFeature("path_segment_count", pathSegmentCount, logger),
+		m.normalizeFeature("http_method", httpMethod, logger),
+		m.normalizeFeature("user_agent", userAgent, logger),
+		m.normalizeFeature("referrer", referrer, logger),
 	}
 
 	score := 0.0
@@ -201,13 +141,13 @@ func (m *mlModel) getFeatures(requestSize int64, headerCount, queryParamCount, p
 	defer m.mu.RUnlock()
 
 	features := []string{
-		normalizeFeature("request_size", requestSize),
-		normalizeFeature("header_count", headerCount),
-		normalizeFeature("query_param_count", queryParamCount),
-		normalizeFeature("path_segment_count", pathSegmentCount),
-		normalizeFeature("http_method", httpMethod),
-		normalizeFeature("user_agent", userAgent),
-		normalizeFeature("referrer", referrer),
+		m.normalizeFeature("request_size", requestSize, logger),
+		m.normalizeFeature("header_count", headerCount, logger),
+		m.normalizeFeature("query_param_count", queryParamCount, logger),
+		m.normalizeFeature("path_segment_count", pathSegmentCount, logger),
+		m.normalizeFeature("http_method", httpMethod, logger),
+		m.normalizeFeature("user_agent", userAgent, logger),
+		m.normalizeFeature("referrer", referrer, logger),
 	}
 
 	scores := make(map[string]float64)
@@ -232,6 +172,14 @@ func (m *mlModel) UpdateFeatureScores(feature string, score float64) {
 	defer m.mu.Unlock()
 	m.featureScores[feature] = score
 	m.logger.Info("Feature score updated", zap.String("feature", feature), zap.Float64("score", score))
+}
+
+// setFeatureMapper adds a new feature mapper dynamically.
+func (m *mlModel) SetFeatureMapper(feature string, keys []string, normalizer string, logger *zap.Logger) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.featureMappers[feature] = featureMapper{featureName: feature, featureKeys: keys, normalizer: normalizer}
+	logger.Info("Feature mapper configured", zap.String("feature", feature), zap.Any("keys", keys), zap.String("normalizer", normalizer))
 }
 
 // initializeMLModel initializes the ML model from the specified file path.
