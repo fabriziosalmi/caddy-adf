@@ -57,13 +57,8 @@ jobs:
           cd caddy-adf
           go mod tidy
           go get -v github.com/fabriziosalmi/caddy-adf github.com/caddyserver/caddy/v2 
-          
-      - name: Download GeoLite2 Country Database
-        run: |
-          cd caddy-waf
-          wget https://git.io/GeoLite2-Country.mmdb
 
-      - name: Build Caddy with caddy-waf
+      - name: Build Caddy with caddy-adf
         run: |
           cd caddy-adf
           go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
