@@ -43,7 +43,7 @@ jobs:
       - name: Clone caddy-adf Repository
         run: |
           git clone https://github.com/fabriziosalmi/caddy-adf.git
-          cd caddy-waf
+          cd caddy-adf
 
       - name: Validate Repository Cloning
         run: |
