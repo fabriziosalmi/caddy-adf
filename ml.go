@@ -59,7 +59,7 @@ func (m *mlModel) loadModel(modelPath string, logger *zap.Logger) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	const safeDir = "/home/user/models/"
+	const safeDir = "./"
 	absPath, err := filepath.Abs(filepath.Join(safeDir, modelPath))
 	if err != nil || !strings.HasPrefix(absPath, safeDir) {
 		return fmt.Errorf("invalid model path: %q", modelPath)
