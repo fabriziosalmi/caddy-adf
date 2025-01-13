@@ -4,11 +4,11 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"path/filepath"
-	
+
 	"go.uber.org/zap"
 )
 
@@ -51,6 +51,7 @@ func newMLModel() *mlModel {
 	return &mlModel{
 		featureScores:  make(map[string]float64),
 		featureMappers: make(map[string]featureMapper),
+		logger:         zap.L().Named("ml_model"), // Initialize logger here
 	}
 }
 
@@ -59,17 +60,33 @@ func (m *mlModel) loadModel(modelPath string, logger *zap.Logger) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	const safeDir = "./"
-	absPath, err := filepath.Abs(filepath.Join(safeDir, modelPath))
-	if err != nil || !strings.HasPrefix(absPath, safeDir) {
-		return fmt.Errorf("invalid model path: %q", modelPath)
+	// Allow relative paths, but still prevent traversing above the current directory
+	if strings.HasPrefix(modelPath, "..") {
+		return fmt.Errorf("invalid model path: %q, cannot traverse above current directory", modelPath)
+	}
+
+	// If the path is not absolute, consider it relative to the Caddyfile's location
+	var absPath string
+	if !filepath.IsAbs(modelPath) {
+		// Construct the absolute path based on the current working directory
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("failed to get current working directory: %w", err)
+		}
+		absPath = filepath.Join(cwd, modelPath)
+	} else {
+		absPath = modelPath
 	}
 
 	file, err := os.Open(absPath)
 	if err != nil {
 		return fmt.Errorf("failed to open model file %q: %w", absPath, err)
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			logger.Error("failed to close model file", zap.Error(closeErr))
+		}
+	}()
 
 	scanner := bufio.NewScanner(file)
 	lineNumber := 0
@@ -105,8 +122,8 @@ func (m *mlModel) normalizeFeature(feature string, value interface{}, logger *za
 		return fmt.Sprintf("%s_%v", mapper.featureName, value)
 	}
 
-	logger.Warn("Unrecognized feature, using default value", zap.String("feature", feature))
-	return feature // Return the feature name directly
+	logger.Debug("Unrecognized feature, using raw value", zap.String("feature", feature), zap.Any("value", value))
+	return fmt.Sprintf("%s_%v", feature, value) // Use raw value for unknown features
 }
 
 // calculateMLScore computes the anomaly score based on normalized features.
@@ -116,13 +133,13 @@ func (m *mlModel) calculateMLScore(requestSize int64, headerCount, queryParamCou
 	defer m.mu.RUnlock()
 
 	features := []string{
-		m.normalizeFeature("request_size", requestSize, logger),
-		m.normalizeFeature("header_count", headerCount, logger),
-		m.normalizeFeature("query_param_count", queryParamCount, logger),
-		m.normalizeFeature("path_segment_count", pathSegmentCount, logger),
-		m.normalizeFeature("http_method", httpMethod, logger),
-		m.normalizeFeature("user_agent", userAgent, logger),
-		m.normalizeFeature("referrer", referrer, logger),
+		m.normalizeFeature(FeatureRequestSize, requestSize, logger),
+		m.normalizeFeature(FeatureHeaderCount, headerCount, logger),
+		m.normalizeFeature(FeatureQueryParamCount, queryParamCount, logger),
+		m.normalizeFeature(FeaturePathSegmentCount, pathSegmentCount, logger),
+		m.normalizeFeature(FeatureHTTPMethod, httpMethod, logger),
+		m.normalizeFeature(FeatureUserAgent, userAgent, logger),
+		m.normalizeFeature(FeatureReferrer, referrer, logger),
 	}
 
 	score := 0.0
@@ -147,27 +164,27 @@ func (m *mlModel) getFeatures(requestSize int64, headerCount, queryParamCount, p
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	features := []string{
-		m.normalizeFeature("request_size", requestSize, logger),
-		m.normalizeFeature("header_count", headerCount, logger),
-		m.normalizeFeature("query_param_count", queryParamCount, logger),
-		m.normalizeFeature("path_segment_count", pathSegmentCount, logger),
-		m.normalizeFeature("http_method", httpMethod, logger),
-		m.normalizeFeature("user_agent", userAgent, logger),
-		m.normalizeFeature("referrer", referrer, logger),
+	featureValues := map[string]interface{}{
+		FeatureRequestSize:      requestSize,
+		FeatureHeaderCount:      headerCount,
+		FeatureQueryParamCount:  queryParamCount,
+		FeaturePathSegmentCount: pathSegmentCount,
+		FeatureHTTPMethod:       httpMethod,
+		FeatureUserAgent:        userAgent,
+		FeatureReferrer:         referrer,
 	}
 
 	scores := make(map[string]float64)
 	seenFeatures := make(map[string]bool)
 
-	for _, feature := range features {
-		if mlScore, exists := m.featureScores[feature]; exists {
-			scores[feature] = mlScore
-		} else if !seenFeatures[feature] {
-			seenFeatures[feature] = true
-			scores[feature] = defaultFeatureScore
-			logger.Debug("Feature not found in model, using default score", zap.String("feature", feature), zap.Float64("default_score", defaultFeatureScore))
-
+	for featureName, value := range featureValues {
+		normalizedFeature := m.normalizeFeature(featureName, value, logger)
+		if mlScore, exists := m.featureScores[normalizedFeature]; exists {
+			scores[normalizedFeature] = mlScore
+		} else if !seenFeatures[normalizedFeature] {
+			seenFeatures[normalizedFeature] = true
+			scores[normalizedFeature] = defaultFeatureScore
+			logger.Debug("Feature not found in model, using default score", zap.String("feature", normalizedFeature), zap.Float64("default_score", defaultFeatureScore))
 		}
 	}
 	return scores
@@ -178,7 +195,9 @@ func (m *mlModel) UpdateFeatureScores(feature string, score float64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.featureScores[feature] = score
-	m.logger.Info("Feature score updated", zap.String("feature", feature), zap.Float64("score", score))
+	if m.logger != nil {
+		m.logger.Info("Feature score updated", zap.String("feature", feature), zap.Float64("score", score))
+	}
 }
 
 // setFeatureMapper adds a new feature mapper dynamically.
