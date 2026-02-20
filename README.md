@@ -3,7 +3,7 @@
 [![Go](https://github.com/fabriziosalmi/caddy-adf/actions/workflows/go.yml/badge.svg)](https://github.com/fabriziosalmi/caddy-adf/actions/workflows/go.yml)
 [![CodeQL](https://github.com/fabriziosalmi/caddy-adf/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/fabriziosalmi/caddy-adf/actions/workflows/github-code-scanning/codeql) [![Build and test Caddy with ADF](https://github.com/fabriziosalmi/caddy-adf/actions/workflows/main.yml/badge.svg)](https://github.com/fabriziosalmi/caddy-adf/actions/workflows/main.yml)
 
-`caddy-adf` is a Caddy middleware module providing a simulated Machine Learning-based Web Application Firewall (WAF). It analyzes incoming HTTP requests, calculates anomaly scores based on various attributes, and can flag or block suspicious traffic. It's designed for flexible, real-time threat detection and can be customized to fit a wide range of web application needs.
+`caddy-adf` is a Caddy middleware module that calculates an anomaly score for each incoming HTTP request and flags or blocks requests that exceed configurable thresholds. Scoring is based on weighted request attributes (size, headers, query parameters, path segments, HTTP method, User-Agent, and Referrer) combined with per-IP request history. An optional feature score lookup file can be loaded to add an extra component to the score.
 
 ## Table of Contents
 
@@ -13,9 +13,9 @@
     *   [Attribute Extraction](#attribute-extraction)
     *   [Scoring Mechanism](#scoring-mechanism)
         *   [Traditional Score](#traditional-score)
-        *   [ML Score](#ml-score)
+        *   [Feature Score Lookup (optional)](#feature-score-lookup-optional)
     *   [Request History Tracking](#request-history-tracking)
-    *   [Request Redaction](#request-redaction)
+    *   [Log Redaction](#log-redaction)
     *   [Threshold-Based Action](#threshold-based-action)
         *   [Dynamic Thresholds](#dynamic-thresholds)
         *   [Default Path Configuration](#default-path-configuration)
@@ -47,7 +47,7 @@
 
 ## 1. Installation
 
-To use `caddy-adf`, you need to have Caddy v2 adn xcaddy already installed. Follow these steps to install the module:
+To use `caddy-adf`, you need to have Caddy v2 and xcaddy already installed. Follow these steps to install the module:
 
 1.  **Quick Start:** You can download the pre-compiled module or build it yourself.
 
@@ -62,21 +62,20 @@ To use `caddy-adf`, you need to have Caddy v2 adn xcaddy already installed. Foll
 
 ## 2. Features
 
--   **🤖 Anomaly Detection**: Analyzes request size, headers, query parameters, path segments, HTTP methods, User-Agents, and Referrers to identify anomalous patterns.
--   **🔗 Request Correlation**: Leverages client IP request history to identify potentially malicious patterns over time, enhancing detection accuracy.
--   **🚦 Configurable Thresholds**:
-    -   `anomaly_threshold`: Flags requests with an anomaly score above this value as suspicious.
-    -   `blocking_threshold`: Blocks requests with an anomaly score above this value.
--   **📁 Per-Path Configurations**: Allows you to define unique anomaly and blocking thresholds for specific paths, offering more granular control.
--   **🗂️ Default Per-Path Configurations:** Set a default configuration for all paths that do not have a specific configuration.
--    **🎛️ Flexible Normalization:** You can choose between linear or log normalization methods for individual attributes.
--   **⚖️ Customizable Weighting**: Provides fine-grained control over how each attribute contributes to the overall anomaly score.
--   **⏱️ Dynamic Analysis**: Adapts to changes in traffic and attack patterns based on configurable history window and maximum history entries.
--   **⚡ Lightweight and Efficient**: Designed to have minimal impact on performance.
--   **🛡️ Protection against common attacks**: Helps protect against brute force, DDoS, scanning, and other malicious activities.
- -   **🛡️ Redaction:** Automatically redacts sensitive headers and query parameters based on regex, such as `Authorization`, `Cookie`, `Set-Cookie`, `token`, `password`, and `api_key`.
--   **⚙️ ML Model Update at Runtime**: You can update the model at runtime without restarting Caddy.
--    **📈 Get Config Endpoint**: You can get the current configuration using an endpoint that returns JSON.
+-   **Anomaly Detection**: Calculates a score for each request based on size, header count, query parameter count, path segment count, HTTP method, User-Agent, and Referrer.
+-   **Request Correlation**: Maintains a per-IP request history to detect suspicious patterns over time. Past high-scoring requests from the same IP contribute to the current score.
+-   **Configurable Thresholds**:
+    -   `anomaly_threshold`: Flags requests with an anomaly score above this value as suspicious (adds `X-Suspicious-Traffic: true` response header).
+    -   `blocking_threshold`: Blocks requests with an anomaly score above this value (returns `403 Forbidden`).
+-   **Per-Path Configurations**: Define different anomaly and blocking thresholds for specific URL paths using exact path matching.
+-   **Default Per-Path Configuration**: Set a fallback configuration for paths that do not have an explicit per-path entry.
+-   **Flexible Normalization**: Choose between `linear` or `log` normalization for individual numeric attributes.
+-   **Customizable Weights**: Control how much each attribute contributes to the overall anomaly score.
+-   **Request Frequency Scoring**: Penalizes clients that send a high number of requests within the configured history window.
+-   **Log Redaction**: Redacts sensitive headers and query parameters in debug log output. Patterns are matched using regular expressions.
+-   **Feature Score Lookup (optional)**: When `enable_ml` is set and a `model_path` is provided, the module loads a CSV file mapping feature-value strings to scores and adds those scores to the total. This is a static lookup table, not a trained machine learning model.
+-   **Runtime Model Reload**: Update the feature score file at runtime via an HTTP endpoint without restarting Caddy.
+-   **Config Endpoint**: Retrieve the current configuration as JSON via an HTTP endpoint.
 
 ---
 
@@ -103,29 +102,41 @@ The anomaly score is calculated by combining normalized attribute scores with th
 #### Traditional Score
 
 1.  **Normalization:** Each attribute (`requestSize`, `headerCount`, `queryParamCount`, and `pathSegmentCount`) is normalized based on its configured `min` and `max` range and a normalization function.
-     * You can configure a `linear` or `log` normalization using the `normalization_config` option.
-     *  If the value is within the normal range, the normalized value is `0.0`.
-    * If the value is less than the minimum, the value is the positive ratio of the difference from the minimum, divided by `(min + 1)`.
-    * If the value is greater than the maximum, the value is the natural logarithm of the difference from the maximum, divided by `(max + 1) + 1`.
+     * You can configure a `linear` (default) or `log` normalization using the `normalization_config` option.
+     *  If the value is within the normal range `[min, max]`, the normalized value is `0.0`.
+    * If the value is less than `min`, the contribution is `(min - value) / (min + 1)` for both normalizer types.
+    * If the value is greater than `max`:
+      * `linear`: `(value - max) / (max + 1)`
+      * `log`: `math.Log((value - max) / (max + 1) + 1)`
 
 2.  **Weighting:** Each normalized attribute is multiplied by its respective weight (`request_size_weight`, `header_count_weight`, etc.).
 3.  **Frequency Score:** If `request_frequency_weight` is set, the request frequency over the `history_window` is calculated and multiplied by the frequency weight.
 4.  **Method, User-Agent, Referrer Scores:** Requests that do not match the defined `normal_http_methods`, `normal_user_agents`, and `normal_referrers` will be penalized by the weights: `http_method_weight`, `user_agent_weight`, and `referrer_weight`.
 5.  **Correlation Score:** The history is checked for previous suspicious requests (above `anomaly_threshold`). A correlation score is added, giving more weight to suspicious traffic that is part of a correlated pattern over time.
 
-#### ML Score
+#### Feature Score Lookup (optional)
 
-1.  **Feature Extraction:** The request's attributes are processed by the ML model to extract different features. These features are calculated using helper methods, and transformed into keys that match the model dictionary.
-2.  **Score Retrieval:** The model looks up scores corresponding to each feature based on a pre-trained model file.
-3.  **Score Calculation:** If a feature is found in the dictionary, the score will be added, otherwise a `0.1` score is added by default.
+When `enable_ml` is `true` and `model_path` points to a valid file, an additional score component is calculated by looking up feature-value strings in a static table loaded from that file.
+
+The model file is a plain-text CSV where each line contains a feature-value key and a score:
+
+```
+request_size_0, 0.1
+http_method_GET, 0.05
+user_agent_curl, 0.2
+```
+
+For each request, the middleware constructs a key for each attribute (e.g., `http_method_GET`) and sums the corresponding scores from the table. If a key is not found, a default score of `0.1` is used.
+
+This is a static lookup table, not a trained machine learning model. The file can be updated at runtime via the admin endpoint.
 
 ### Request History Tracking
 
 Maintains a history of requests for each client IP within a configurable time window, enabling detection of suspicious patterns over time and request correlation. This history is sharded to optimize performance.
 
-### Request Redaction
+### Log Redaction
 
-The middleware sanitizes the requests by redacting sensitive headers and query parameters based on the provided lists using regular expressions for matching.
+When logging at debug level, the middleware redacts the values of sensitive headers and query parameters before writing to the log. Header and query parameter names are matched against the redaction lists using regular expressions. The actual HTTP request forwarded to the next handler is not modified.
 
 ### Threshold-Based Action
 
@@ -172,7 +183,7 @@ If a `per_path_config` is not defined for a given path, the `default_path_config
             normal_user_agents Mozilla Chrome Safari python-requests/2.32.3 curl
             normal_referrers https://example.com https://trusted.example.org
 
-            # Weights - Using a mix of traditional and ML
+            # Weights
             request_size_weight 0.1
             header_count_weight 0.1
             query_param_count_weight 0.05
@@ -186,7 +197,7 @@ If a `per_path_config` is not defined for a given path, the `default_path_config
             history_window 10m
             max_history_entries 2000
 
-            # Enable ML and Model Path
+            # Feature score lookup (optional)
             enable_ml true
             model_path pre-trained.model
 
@@ -207,22 +218,22 @@ If a `per_path_config` is not defined for a given path, the `default_path_config
                 blocking_threshold 0.4
             }
 
-            # Per-Path Configurations (Using regex)
-            per_path_config "^/api/v[0-9]+(/.*)?$" {  # API endpoints with versioning
+            # Per-Path Configurations (exact path match)
+            per_path_config /api {
                 anomaly_threshold 0.1
                 blocking_threshold 0.5
             }
 
-            per_path_config "^/admin(/.*)?$" {  # Admin interface
+            per_path_config /admin {
                 anomaly_threshold 0.02
                 blocking_threshold 0.2
             }
-             per_path_config "/download" { # Download endpoint with strict rules
+             per_path_config /download {
                 anomaly_threshold 0.3
                 blocking_threshold 0.7
             }
 
-            per_path_config "/health" { # Health endpoint, least strict, not blocked ever
+            per_path_config /health {
                 anomaly_threshold 1
                 blocking_threshold 10
             }
@@ -257,16 +268,16 @@ If a `per_path_config` is not defined for a given path, the `default_path_config
 | `request_frequency_weight`   | `float`     | `1.0`   | Weight for the request frequency in the anomaly score calculation. Increasing this makes the module more sensitive to high request rates from the same client.                 |
 | `history_window`             | `duration`  | `1m`    | Duration for which request history is kept. Increase this for longer-term behavior analysis and decreased for shorter-term analysis.                                         |
 | `max_history_entries`        | `int`       | `10`    | Maximum number of request history entries per client IP to store. Adjust based on the `history_window` and the volume of traffic you expect to process.                        |
-| `header_redaction_list`    | `string...` | `["Authorization", "Cookie", "Set-Cookie"]`     | List of headers to be redacted. These will be matched using regular expressions.                                                                 |
-| `query_param_redaction_list`  | `string...` | `["token", "password", "api_key"]`     | List of query parameters to be redacted. These will be matched using regular expressions.                                                                 |
+| `header_redaction_list`    | `string...` | `["Authorization", "Cookie", "Set-Cookie"]`     | List of header name patterns (regular expressions) whose values are replaced with `REDACTED` in debug log output. The actual forwarded request is not modified. |
+| `query_param_redaction_list`  | `string...` | `["token", "password", "api_key"]`     | List of query parameter name patterns (regular expressions) whose values are replaced with `REDACTED` in debug log output. The actual forwarded request is not modified. |
  | `dynamic_threshold_enabled`  | `boolean`     | `false`   | If enabled, the anomaly threshold will be calculated based on a moving average.                                                                        |
 |`dynamic_threshold_factor`  | `float` | `1.0` | Factor to be applied to the moving average, only used if `dynamic_threshold_enabled` is `true`.
-| `enable_ml`                | `boolean` | `false`   | If enabled, the Machine learning-based score will be added to the anomaly score.   |
-| `model_path`               | `string`     | `""`    | Path to the pre-trained model file.                                                                                                               |
+| `enable_ml`                | `boolean` | `false`   | If `true`, loads the feature score lookup file specified by `model_path` and adds those scores to the anomaly score. |
+| `model_path`               | `string`     | `""`    | Path to the feature score CSV file. Each line must be `feature_key, score`. Used only when `enable_ml` is `true`. |
 
 ### Normalization Configuration
 
-*   **`normalization_config`**: You can now configure the normalization method for specific attributes using a `normalization_config` block inside the `ml_waf` configuration.
+*   **`normalization_config`**: Configure the normalization method for specific attributes. Specify pairs of `feature normalizer_type` on a single line.
 
     *   You can choose between `linear` (default value) or `log` (logarithmic) normalizations.
 
@@ -279,19 +290,19 @@ If a `per_path_config` is not defined for a given path, the `default_path_config
 
 ### Per-Path Configuration
 
--   **`per_path_config <path> { ... }`**: Allows you to set different `anomaly_threshold` and `blocking_threshold` options for a specific path. You can use regular expressions to match multiple paths.
+-   **`per_path_config <path> { ... }`**: Allows you to set different `anomaly_threshold` and `blocking_threshold` options for a specific path. The path value is matched against `r.URL.Path` using an **exact string comparison**. Only the exact path specified will match; sub-paths do not match automatically.
     -   **`anomaly_threshold`**: `float`. Overrides the global `anomaly_threshold` for this path.
     -   **`blocking_threshold`**: `float`. Overrides the global `blocking_threshold` for this path.
 
 
-```
-            # Per-Path Configurations (Using regex)
-            per_path_config "^/api/v[0-9]+(/.*)?$" {  # API endpoints with versioning
+```caddyfile
+            # Per-Path Configurations (exact path match)
+            per_path_config /api {
                 anomaly_threshold 0.1
                 blocking_threshold 0.5
             }
 
-            per_path_config "^/admin(/.*)?$" {  # Admin interface
+            per_path_config /admin {
                 anomaly_threshold 0.02
                 blocking_threshold 0.2
             }
@@ -436,18 +447,17 @@ ml_waf {
 ## 7. Advanced Configuration
 
 ### Admin Endpoint
-The `caddy-adf` module exposes an admin endpoint that you can use to update the model and see the current configuration.
-*   The `/ml_waf` path is reserved for this endpoint.
+The `caddy-adf` module exposes an admin endpoint for runtime management. The `/ml_waf` path prefix is reserved for this endpoint.
 
 #### Update Model Endpoint
 
 *   **URL:** `POST /ml_waf/update_model`
-*   **Description:** Updates the ML model at runtime without requiring a Caddy restart.
+*   **Description:** Reloads the feature score lookup file at runtime without requiring a Caddy restart.
 *   **Request Body:**
 
     ```json
     {
-      "model_path": "/path/to/your/new_pre-trained.model"
+      "model_path": "/path/to/your/new.model"
     }
     ```
 
@@ -557,7 +567,7 @@ Thresholds determine when a request is considered suspicious or is blocked. Sett
 
 ### Understanding Request History
 
-The request history mechanism helps to identify patterns of attack and correlate suspicious behavior over time. It allows the module to adapt and flag continuous patterns of malicious traffic coming from the same IPs. Here's how to best utilize it:
+The request history stores recent anomaly scores per client IP within a sliding time window. This history is used to calculate the request frequency score and the correlation score (which gives extra weight to IPs that have previously sent high-scoring requests). Here's how to configure it:
 
 -   **`history_window`:** Set this value based on your observation window. If your application needs quick reaction times to attacks that occur in short bursts, shorten the window. For slower attacks (like scanning activities or low-frequency brute-force attempts), keep a longer window.
     *   **Short Window (e.g., 1-5 minutes):** Suitable for quickly detecting and reacting to sudden spikes in activity, such as brute-force login attempts.
